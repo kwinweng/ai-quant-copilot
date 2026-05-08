@@ -29,14 +29,16 @@ import {
 const AI_CONCLUSION =
   "The combined Quality + Value strategy shows statistically robust outperformance of +2.3% CAGR over SPY with improved risk-adjusted returns (Sharpe 0.91 vs 0.78). The strategy benefits from quality screens filtering out value traps, particularly effective during 2022 drawdown where it outperformed by 340 bps. Turnover of 68% is manageable at 5 bps cost assumption. Recommend exploring momentum overlay to reduce whipsaw during trend reversals.";
 
-function MetricRow({ label, strategy, spy, isPositiveGood = true }: {
+function MetricRow({ label, strategy, spy, isPositiveGood = true, strategyNum, spyNum }: {
   label: string;
   strategy: string | number | null;
   spy: string | number | null;
   isPositiveGood?: boolean;
+  strategyNum?: number;
+  spyNum?: number;
 }) {
-  const sVal = typeof strategy === "number" ? strategy : null;
-  const bVal = typeof spy === "number" ? spy : null;
+  const sVal = strategyNum ?? (typeof strategy === "number" ? strategy : null);
+  const bVal = spyNum ?? (typeof spy === "number" ? spy : null);
   const isBetter = sVal !== null && bVal !== null
     ? isPositiveGood ? sVal > bVal : sVal < bVal
     : false;
@@ -107,13 +109,13 @@ export default function DemoResult() {
                 </tr>
               </thead>
               <tbody>
-                <MetricRow label="CAGR" strategy={`${m.strategy.cagr}%`} spy={`${m.spy.cagr}%`} />
+                <MetricRow label="CAGR" strategy={`${m.strategy.cagr}%`} spy={`${m.spy.cagr}%`} strategyNum={m.strategy.cagr} spyNum={m.spy.cagr} />
                 <MetricRow label="Sharpe Ratio" strategy={m.strategy.sharpe} spy={m.spy.sharpe} />
-                <MetricRow label="Max Drawdown" strategy={`${m.strategy.maxDrawdown}%`} spy={`${m.spy.maxDrawdown}%`} isPositiveGood={false} />
+                <MetricRow label="Max Drawdown" strategy={`${m.strategy.maxDrawdown}%`} spy={`${m.spy.maxDrawdown}%`} strategyNum={m.strategy.maxDrawdown} spyNum={m.spy.maxDrawdown} isPositiveGood={true} />
                 <MetricRow label="Calmar Ratio" strategy={m.strategy.calmar} spy={m.spy.calmar} />
-                <MetricRow label="Annual Vol" strategy={`${m.strategy.annualVol}%`} spy={`${m.spy.annualVol}%`} isPositiveGood={false} />
+                <MetricRow label="Annual Vol" strategy={`${m.strategy.annualVol}%`} spy={`${m.spy.annualVol}%`} strategyNum={m.strategy.annualVol} spyNum={m.spy.annualVol} isPositiveGood={false} />
                 <MetricRow label="Beta" strategy={m.strategy.beta} spy={m.spy.beta} isPositiveGood={false} />
-                <MetricRow label="Alpha (ann.)" strategy={`+${m.strategy.alpha}%`} spy="0%" />
+                <MetricRow label="Alpha (ann.)" strategy={`+${m.strategy.alpha}%`} spy="0%" strategyNum={m.strategy.alpha} spyNum={0} />
                 <MetricRow label="Information Ratio" strategy={m.strategy.informationRatio} spy="—" />
                 <MetricRow label="Turnover" strategy={`${m.strategy.turnover}%`} spy="—" />
                 <MetricRow label="Monthly Win Rate" strategy={`${m.strategy.winRate}%`} spy="—" />

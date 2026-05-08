@@ -23,7 +23,7 @@ All 6 routes are implemented and `npm run build` passes clean.
 
 ## Known Remaining Polish (Low Priority)
 
-- [ ] MetricRow comparison in demo-result doesn't highlight CAGR/Drawdown green (values passed as strings — numeric comparison silently skips)
+- [x] MetricRow comparison in demo-result: fixed CAGR, Max Drawdown, Annual Vol, Alpha — added `strategyNum`/`spyNum` props; corrected Max Drawdown `isPositiveGood` direction
 - [ ] No mobile hamburger menu — nav items hidden below sm breakpoint
 - [ ] Equity curve uses `filter((_, i) => i % 2 === 0)` subsampling; could expose more granular monthly data
 - [ ] Running page "remaining time" estimate is approximate (based on fixed sim speed, not wall-clock)
