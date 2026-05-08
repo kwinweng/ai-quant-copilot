@@ -9,6 +9,12 @@
 .ralph/.response_analysis
 .ralph/.circuit_breaker_state
 .ralph/.circuit_breaker_history
+.ralph/.loop_start_sha
+.ralph/.token_count
+.ralph/progress.json
+
+# Claude Code local settings
+.claude/
 
 # Ralph logs and generated docs
 .ralph/logs/*
