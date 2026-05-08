@@ -1,0 +1,36 @@
+# Local dev PostgreSQL — runs on host port 5433 to avoid colliding with the
+# system Postgres that production uses on 5432.
+#
+# Usage:
+#   docker compose up -d         # start
+#   docker compose down          # stop (data persists in named volume)
+#   docker compose down -v       # stop and wipe data
+#
+# After it's up, point .env.local at it:
+#   DATABASE_URL=postgresql://aiquant:devpass@localhost:5433/ai_quant_copilot
+#
+# Then:
+#   npx prisma migrate dev --name init
+#   npm run dev
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: ai-quant-copilot-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aiquant
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: ai_quant_copilot
+    ports:
+      - "5433:5432"
+    volumes:
+      - ai_quant_copilot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiquant -d ai_quant_copilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ai_quant_copilot_pgdata:

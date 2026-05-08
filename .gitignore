@@ -40,6 +40,11 @@ node_modules/
 .next/
 out/
 
+# Environment variables
+.env
+.env.local
+.env.*.local
+
 
 # Python cache (if using Python projects)
 __pycache__/

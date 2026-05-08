@@ -29,11 +29,37 @@ export default function NewStudy() {
   const [maxPosition, setMaxPosition] = useState("5");
   const [longShort, setLongShort] = useState("仅做多");
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setErrorMsg(null);
     setLoading(true);
-    setTimeout(() => router.push("/studies/plan"), 600);
+    try {
+      const res = await fetch("/api/studies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hypothesis: hypothesis.trim(),
+          market: "US",
+          universe,
+          startDate,
+          endDate,
+          rebalance,
+          benchmark,
+          txCostBps: Number(txCost) || 0,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `创建失败 (HTTP ${res.status})`);
+      }
+      const { study } = (await res.json()) as { study: { id: string } };
+      router.push(`/studies/${study.id}/plan`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "创建研究失败");
+      setLoading(false);
+    }
   }
 
   return (
@@ -219,6 +245,12 @@ export default function NewStudy() {
             </div>
           )}
         </div>
+
+        {errorMsg && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+            {errorMsg}
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex justify-end gap-3 pt-2">

@@ -1,15 +1,37 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+
+import { useEffect, useState, useRef, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
+import useSWR from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Check, Loader2, StopCircle } from "lucide-react";
+import { DEMO_STUDIES } from "../../../../../../prisma/seed-data";
+
+interface ApiStudy {
+  id: string;
+  title: string;
+  hypothesis: string;
+  universe: string;
+  startDate: string;
+  endDate: string;
+  rebalance: string;
+  benchmark: string;
+  txCostBps: number;
+  status: string;
+}
+
+const fetcher = (url: string) =>
+  fetch(url).then(async (r) => {
+    if (!r.ok) throw new Error(`Request failed: ${r.status}`);
+    return r.json();
+  });
 
 const STEPS_ZH = [
   { id: 1, name: "校验参数", description: "检查股票池、日期范围和因子定义" },
-  { id: 2, name: "获取价格数据", description: "下载 Russell 1000 成分股 OHLCV (2014–2024)" },
+  { id: 2, name: "获取价格数据", description: "下载成分股 OHLCV" },
   { id: 3, name: "获取基本面数据", description: "加载 ROIC、ROE、毛利率、PE、PB、PS" },
-  { id: 4, name: "计算因子得分", description: "按季度计算质量 + 价值复合 z-score" },
+  { id: 4, name: "计算因子得分", description: "按再平衡频率计算复合 z-score" },
   { id: 5, name: "构建投资组合", description: "选择前 20%，应用集中度限制" },
   { id: 6, name: "运行回测引擎", description: "模拟每日盈亏，含交易成本与再平衡" },
   { id: 7, name: "计算风险指标", description: "CAGR、Sharpe、Max Drawdown、Calmar、IR" },
@@ -34,31 +56,11 @@ const STEP_FILE_INFO: { files: string; size: string }[] = [
 
 const LOG_TEMPLATES: string[][] = [
   ["参数校验通过", "因子定义合法"],
-  [
-    "开始下载 Russell 1000 成分股",
-    "已加载 250 / 1023 标的",
-    "已加载 600 / 1023 标的",
-    "已加载 1023 / 1023 标的",
-  ],
-  [
-    "开始加载基本面数据",
-    "已加载 ROIC 数据",
-    "已加载 ROE 与毛利率",
-    "已加载 PE / PB / PS",
-  ],
-  [
-    "计算 2014 Q1 z-score",
-    "计算 2018 Q1 z-score",
-    "计算 2022 Q1 z-score",
-    "复合因子得分完成",
-  ],
-  ["筛选 top 20% 标的", "应用单票仓位上限 3%", "组合构建完成"],
-  [
-    "回测 2014 年完成",
-    "回测 2018 年完成",
-    "回测 2022 年完成",
-    "回测 2024 年完成",
-  ],
+  ["开始下载价格数据", "已加载 25%", "已加载 60%", "已加载 100%"],
+  ["开始加载基本面数据", "ROIC 完成", "ROE / 毛利率 完成", "PE / PB / PS 完成"],
+  ["计算 z-score", "复合因子打分完成"],
+  ["筛选 top 20%", "应用单票仓位上限", "组合构建完成"],
+  ["回测进行中…", "已完成 50% 区间", "回测完成"],
   ["计算 CAGR / Sharpe", "计算 Max Drawdown", "计算 IR / Calmar"],
   ["AI 分析归因", "生成结论摘要", "报告生成完成"],
 ];
@@ -84,17 +86,14 @@ function getStatuses(simTime: number): StepStatus[] {
   });
 }
 
-const RUN_START = new Date();
-RUN_START.setHours(14, 23, 5, 0);
-
-function formatClock(simSeconds: number): string {
-  const t = new Date(RUN_START.getTime() + simSeconds * 1000);
+function formatClock(start: Date, simSeconds: number): string {
+  const t = new Date(start.getTime() + simSeconds * 1000);
   return `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}:${t.getSeconds().toString().padStart(2, "0")}`;
 }
 
 type LogEntry = { ts: string; msg: string; type: "info" | "success" | "start" };
 
-function generateLogs(simTime: number): LogEntry[] {
+function generateLogs(simTime: number, runStart: Date): LogEntry[] {
   const logs: LogEntry[] = [];
   for (let i = 0; i < STEP_SIM_DURATIONS.length; i++) {
     const start = i === 0 ? 0 : CUM_ENDS[i - 1];
@@ -102,7 +101,7 @@ function generateLogs(simTime: number): LogEntry[] {
     if (simTime < start) break;
 
     logs.push({
-      ts: formatClock(start),
+      ts: formatClock(runStart, start),
       msg: `▶ 步骤 ${i + 1}/${STEPS_ZH.length}: ${STEPS_ZH[i].name}`,
       type: "start",
     });
@@ -113,7 +112,7 @@ function generateLogs(simTime: number): LogEntry[] {
       const threshold = (j + 1) / (templates.length + 1);
       if (progress > threshold) {
         logs.push({
-          ts: formatClock(start + (end - start) * threshold),
+          ts: formatClock(runStart, start + (end - start) * threshold),
           msg: `  ${templates[j]}`,
           type: "info",
         });
@@ -122,7 +121,7 @@ function generateLogs(simTime: number): LogEntry[] {
 
     if (progress >= 1) {
       logs.push({
-        ts: formatClock(end),
+        ts: formatClock(runStart, end),
         msg: `  ✓ 步骤 ${i + 1} 完成 (${STEP_DISPLAY_DURATIONS[i]}s)`,
         type: "success",
       });
@@ -131,16 +130,42 @@ function generateLogs(simTime: number): LogEntry[] {
   return logs;
 }
 
+function buildResultPayload() {
+  const tpl = DEMO_STUDIES[0];
+  return {
+    conclusion: tpl.conclusion,
+    metrics: tpl.metrics,
+    equityCurve: tpl.equityCurve,
+    drawdown: tpl.drawdown,
+    annualReturns: tpl.annualReturns,
+    factorDiagnostics: tpl.factorDiagnostics,
+    aiExplanation: tpl.aiExplanation,
+  };
+}
+
 export default function RunningPage() {
   const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const studyId = params.id;
+
+  const { data, error, isLoading } = useSWR<{ study: ApiStudy }>(
+    studyId ? `/api/studies/${studyId}` : null,
+    fetcher,
+  );
+  const study = data?.study;
+
   const [simTime, setSimTime] = useState(0);
   const [realElapsed, setRealElapsed] = useState(0);
-  const [navigating, setNavigating] = useState(false);
   const [stopped, setStopped] = useState(false);
+  const [persisting, setPersisting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const persistedRef = useRef(false);
   const logScrollRef = useRef<HTMLDivElement>(null);
 
+  const runStart = useMemo(() => new Date(), []);
+
   useEffect(() => {
-    if (stopped) return;
+    if (stopped || !study) return;
     const interval = setInterval(() => {
       setRealElapsed((s) => s + 1);
       setSimTime((s) => {
@@ -149,7 +174,30 @@ export default function RunningPage() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [stopped]);
+  }, [stopped, study]);
+
+  // Push periodic progress updates to the API every ~5 sim-seconds
+  const lastSyncedStep = useRef(-1);
+  useEffect(() => {
+    if (!study) return;
+    const statuses = getStatuses(simTime);
+    const currentStep = statuses.findIndex((s) => s !== "complete");
+    const stepIdx = currentStep === -1 ? STEPS_ZH.length - 1 : currentStep;
+    if (stepIdx !== lastSyncedStep.current) {
+      lastSyncedStep.current = stepIdx;
+      void fetch(`/api/studies/${study.id}/progress`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentStep: stepIdx,
+          steps: statuses.map((s, i) => ({
+            name: STEPS_ZH[i].name,
+            status: s,
+          })),
+        }),
+      }).catch(() => {});
+    }
+  }, [simTime, study]);
 
   const statuses = getStatuses(simTime);
   const isComplete = simTime >= SIM_TOTAL;
@@ -157,9 +205,9 @@ export default function RunningPage() {
   const progress = Math.round((simTime / SIM_TOTAL) * 100);
   const secsRemaining = Math.max(
     0,
-    Math.ceil((SIM_TOTAL - simTime) / SIM_SPEED)
+    Math.ceil((SIM_TOTAL - simTime) / SIM_SPEED),
   );
-  const logs = generateLogs(simTime);
+  const logs = generateLogs(simTime, runStart);
 
   useEffect(() => {
     if (logScrollRef.current) {
@@ -167,13 +215,27 @@ export default function RunningPage() {
     }
   }, [logs.length]);
 
+  // On completion, persist result then navigate to result page
   useEffect(() => {
-    if (isComplete && !navigating) {
-      setNavigating(true);
-      const t = setTimeout(() => router.push("/studies/demo-result"), 1500);
-      return () => clearTimeout(t);
-    }
-  }, [isComplete, navigating, router]);
+    if (!isComplete || !study || persistedRef.current) return;
+    persistedRef.current = true;
+    setPersisting(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/studies/${study.id}/result`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildResultPayload()),
+        });
+        if (!res.ok) throw new Error(`保存结果失败 (HTTP ${res.status})`);
+        setTimeout(() => router.push(`/studies/${study.id}/result`), 800);
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : "保存结果失败");
+        setPersisting(false);
+        persistedRef.current = false;
+      }
+    })();
+  }, [isComplete, study, router]);
 
   const formatElapsed = (s: number) => {
     const m = Math.floor(s / 60);
@@ -181,8 +243,25 @@ export default function RunningPage() {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  function handleStop() {
-    setStopped(true);
+  if (isLoading) {
+    return (
+      <div className="p-6">
+        <div className="bg-white border border-gray-200 rounded-lg p-12 flex items-center justify-center text-gray-500 text-sm gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在加载研究…
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !study) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+          加载失败：{(error as Error | undefined)?.message ?? "研究不存在"}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -190,9 +269,7 @@ export default function RunningPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-xl font-semibold text-gray-900">
-            Quality + Value 组合因子
-          </h1>
+          <h1 className="text-xl font-semibold text-gray-900">{study.title}</h1>
           {isComplete ? (
             <Badge variant="success">已完成</Badge>
           ) : stopped ? (
@@ -200,31 +277,39 @@ export default function RunningPage() {
           ) : (
             <Badge variant="running">进行中</Badge>
           )}
-          <span className="text-xs text-gray-400 font-mono">STU-2024-1205-001</span>
+          <span className="text-xs text-gray-400 font-mono">{study.id}</span>
         </div>
         <span className="text-sm text-gray-500 shrink-0">
           已用时 {formatElapsed(realElapsed)}
         </span>
       </div>
 
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+          {errorMsg}
+        </div>
+      )}
+
       {/* Overall progress bar */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-gray-700">
             {isComplete
-              ? "全部步骤已完成"
+              ? persisting
+                ? "正在保存结果…"
+                : "全部步骤已完成"
               : stopped
-              ? `已停止于步骤 ${runningIdx + 1}`
-              : runningIdx >= 0
-              ? `Step ${runningIdx + 1} of ${STEPS_ZH.length} · ${STEPS_ZH[runningIdx].name}`
-              : "准备中..."}
+                ? `已停止于步骤 ${runningIdx + 1}`
+                : runningIdx >= 0
+                  ? `Step ${runningIdx + 1} of ${STEPS_ZH.length} · ${STEPS_ZH[runningIdx].name}`
+                  : "准备中..."}
           </span>
           <span className="text-xs text-gray-500">
             {isComplete
               ? "加载结果中..."
               : stopped
-              ? "已暂停"
-              : `约 ${secsRemaining} 秒剩余`}
+                ? "已暂停"
+                : `约 ${secsRemaining} 秒剩余`}
           </span>
         </div>
         <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -235,8 +320,8 @@ export default function RunningPage() {
               backgroundColor: isComplete
                 ? "#22c55e"
                 : stopped
-                ? "#9ca3af"
-                : "#3b82f6",
+                  ? "#9ca3af"
+                  : "#3b82f6",
             }}
           />
         </div>
@@ -265,8 +350,8 @@ export default function RunningPage() {
                   ? Math.min(
                       100,
                       Math.round(
-                        ((simTime - stepStart) / STEP_SIM_DURATIONS[i]) * 100
-                      )
+                        ((simTime - stepStart) / STEP_SIM_DURATIONS[i]) * 100,
+                      ),
                     )
                   : 0;
               return (
@@ -363,27 +448,29 @@ export default function RunningPage() {
             <div className="px-4 py-3 space-y-2 text-xs">
               <div className="flex justify-between">
                 <span className="text-gray-500">研究编号</span>
-                <span className="text-gray-900 font-mono">STU-2024-1205-001</span>
+                <span className="text-gray-900 font-mono">{study.id}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">股票池</span>
-                <span className="text-gray-900">Russell 1000</span>
+                <span className="text-gray-900">{study.universe}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">回测区间</span>
-                <span className="text-gray-900">2014-01 至 2024-01</span>
+                <span className="text-gray-900">
+                  {study.startDate.slice(0, 10)} → {study.endDate.slice(0, 10)}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">再平衡频率</span>
-                <span className="text-gray-900">季度</span>
+                <span className="text-gray-900">{study.rebalance}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">基准</span>
-                <span className="text-gray-900">SPY</span>
+                <span className="text-gray-900">{study.benchmark}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">交易成本</span>
-                <span className="text-gray-900">5 bps / 笔</span>
+                <span className="text-gray-900">{study.txCostBps} bps / 笔</span>
               </div>
             </div>
           </div>
@@ -409,8 +496,8 @@ export default function RunningPage() {
                         log.type === "success"
                           ? "text-green-400"
                           : log.type === "start"
-                          ? "text-blue-300"
-                          : "text-gray-300"
+                            ? "text-blue-300"
+                            : "text-gray-300"
                       }
                     >
                       {log.msg}
@@ -421,7 +508,7 @@ export default function RunningPage() {
               {!isComplete && !stopped && (
                 <div className="flex gap-2 px-1 py-0.5 animate-pulse">
                   <span className="text-gray-500 shrink-0">
-                    [{formatClock(simTime)}]
+                    [{formatClock(runStart, simTime)}]
                   </span>
                   <span className="text-gray-400">_</span>
                 </div>
@@ -447,7 +534,7 @@ export default function RunningPage() {
         {isComplete ? (
           <Button
             className="bg-blue-600 hover:bg-blue-700 text-white"
-            onClick={() => router.push("/studies/demo-result")}
+            onClick={() => router.push(`/studies/${study.id}/result`)}
           >
             查看结果 →
           </Button>
@@ -463,7 +550,7 @@ export default function RunningPage() {
           <Button
             variant="outline"
             className="border-red-200 text-red-600 hover:bg-red-50 inline-flex items-center gap-1.5"
-            onClick={handleStop}
+            onClick={() => setStopped(true)}
           >
             <StopCircle className="w-4 h-4" />
             停止研究

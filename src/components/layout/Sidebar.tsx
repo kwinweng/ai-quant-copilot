@@ -1,18 +1,74 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Plus, BookOpen, Database } from "lucide-react";
+import { LayoutDashboard, Plus, Database, LogOut } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "仪表盘", icon: LayoutDashboard, exact: true },
   { href: "/studies/new", label: "新研究", icon: Plus, exact: true },
-  { href: "/studies/demo-result", label: "研究列表", icon: BookOpen, exact: false },
   { href: "/data-sources", label: "数据源", icon: Database, exact: false },
 ];
 
 function isActive(pathname: string, href: string, exact: boolean) {
   return exact ? pathname === href : pathname.startsWith(href);
+}
+
+function initialsOf(name?: string | null, email?: string | null) {
+  const source = (name ?? email ?? "?").trim();
+  if (!source) return "?";
+  return source.charAt(0).toUpperCase();
+}
+
+function UserBlock({ compact = false }: { compact?: boolean }) {
+  const { data: session, status } = useSession();
+  const user = session?.user;
+  const display = user?.name ?? user?.email ?? "未登录";
+  const initial = initialsOf(user?.name, user?.email);
+
+  if (compact) {
+    return (
+      <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 overflow-hidden">
+        {user?.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={user.image} alt={display} className="h-full w-full object-cover" />
+        ) : (
+          <span className="text-xs font-semibold text-blue-600">{initial}</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 overflow-hidden">
+        {user?.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={user.image} alt={display} className="h-full w-full object-cover" />
+        ) : (
+          <span className="text-xs font-semibold text-blue-600">{initial}</span>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-gray-900 truncate">{display}</p>
+        <p className="text-xs text-gray-400 truncate">
+          {status === "loading" ? "加载中…" : "研究员"}
+        </p>
+      </div>
+      {status === "authenticated" ? (
+        <button
+          type="button"
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+          title="登出"
+          aria-label="登出"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 export function Sidebar() {
@@ -49,17 +105,9 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* User avatar */}
+      {/* User block */}
       <div className="px-4 py-4 border-t border-gray-100">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-            <span className="text-xs font-semibold text-blue-600">J</span>
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-gray-900 truncate">Jane Doe</p>
-            <p className="text-xs text-gray-400 truncate">研究员</p>
-          </div>
-        </div>
+        <UserBlock />
       </div>
     </aside>
   );
@@ -72,9 +120,7 @@ export function MobileTopBar() {
         <h1 className="text-sm font-bold text-blue-600 leading-tight">AI Quant Copilot</h1>
         <p className="text-[10px] text-gray-400 leading-none mt-0.5">量化研究副驾驶</p>
       </div>
-      <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-        <span className="text-xs font-semibold text-blue-600">J</span>
-      </div>
+      <UserBlock compact />
     </div>
   );
 }

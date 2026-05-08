@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Sidebar, MobileTopBar, MobileTabBar } from "@/components/layout/Sidebar";
+import { AppSessionProvider } from "@/components/providers/SessionProvider";
 
 export const metadata: Metadata = {
   title: "AI Quant Copilot",
@@ -15,12 +15,7 @@ export default function RootLayout({
   return (
     <html lang="zh">
       <body className="bg-gray-50">
-        <Sidebar />
-        <div className="flex flex-col min-h-screen lg:ml-[220px] pb-16 lg:pb-0">
-          <MobileTopBar />
-          <div className="flex-1">{children}</div>
-        </div>
-        <MobileTabBar />
+        <AppSessionProvider>{children}</AppSessionProvider>
       </body>
     </html>
   );

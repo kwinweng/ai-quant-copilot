@@ -1,0 +1,133 @@
+// AI Quant Copilot — Stage 2.1 schema
+// NextAuth v5 + business tables, all isolated per user via userId FK.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// NextAuth.js v5 — required tables for PrismaAdapter
+// ============================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  studies       Study[]
+  createdAt     DateTime  @default(now())
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================================
+// Business tables — every row is owned by a User via userId
+// ============================================================
+
+enum StudyStatus {
+  DRAFT
+  PLANNED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Study {
+  id         String         @id @default(cuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String
+  hypothesis String         @db.Text
+  market     String
+  universe   String
+  startDate  DateTime
+  endDate    DateTime
+  rebalance  String
+  benchmark  String
+  txCostBps  Int
+  status     StudyStatus    @default(DRAFT)
+  plan       StudyPlan?
+  progress   StudyProgress?
+  result     StudyResult?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([userId, createdAt])
+}
+
+model StudyPlan {
+  studyId          String   @id
+  study            Study    @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  dataRequirements String   @db.Text
+  factorDefs       String   @db.Text
+  backtestRules    String   @db.Text
+  riskChecks       String   @db.Text
+  limitations      String   @db.Text
+  createdAt        DateTime @default(now())
+}
+
+model StudyProgress {
+  studyId     String   @id
+  study       Study    @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  currentStep Int
+  steps       Json
+  logs        Json
+  startedAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StudyResult {
+  studyId           String   @id
+  study             Study    @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  conclusion        String   @db.Text
+  metrics           Json
+  equityCurve       Json
+  drawdown          Json
+  annualReturns     Json
+  factorDiagnostics Json
+  aiExplanation     Json
+  createdAt         DateTime @default(now())
+}
