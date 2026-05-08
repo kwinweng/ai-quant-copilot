@@ -157,6 +157,7 @@ export default function RunningPage() {
   const [simTime, setSimTime] = useState(0);
   const [realElapsed, setRealElapsed] = useState(0);
   const [stopped, setStopped] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [persisting, setPersisting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const persistedRef = useRef(false);
@@ -164,8 +165,23 @@ export default function RunningPage() {
 
   const runStart = useMemo(() => new Date(), []);
 
+  // If the study is already COMPLETED (e.g. user revisited the running page
+  // after finishing), forward to the result page instead of re-running the
+  // simulation. CANCELLED studies stay on this page in stopped state.
+  useEffect(() => {
+    if (!study) return;
+    if (study.status === "COMPLETED") {
+      router.replace(`/studies/${study.id}/result`);
+      return;
+    }
+    if (study.status === "CANCELLED" && !stopped) {
+      setStopped(true);
+    }
+  }, [study, router, stopped]);
+
   useEffect(() => {
     if (stopped || !study) return;
+    if (study.status !== "RUNNING") return;
     const interval = setInterval(() => {
       setRealElapsed((s) => s + 1);
       setSimTime((s) => {
@@ -549,11 +565,32 @@ export default function RunningPage() {
         ) : (
           <Button
             variant="outline"
-            className="border-red-200 text-red-600 hover:bg-red-50 inline-flex items-center gap-1.5"
-            onClick={() => setStopped(true)}
+            disabled={cancelling}
+            className="border-red-200 text-red-600 hover:bg-red-50 inline-flex items-center gap-1.5 disabled:opacity-50"
+            onClick={async () => {
+              if (!study) return;
+              setCancelling(true);
+              setErrorMsg(null);
+              try {
+                const res = await fetch(`/api/studies/${study.id}/cancel`, {
+                  method: "POST",
+                });
+                if (!res.ok) {
+                  const body = await res.json().catch(() => ({}));
+                  throw new Error(
+                    body?.error ?? `停止失败 (HTTP ${res.status})`,
+                  );
+                }
+                setStopped(true);
+              } catch (err) {
+                setErrorMsg(err instanceof Error ? err.message : "停止失败");
+              } finally {
+                setCancelling(false);
+              }
+            }}
           >
             <StopCircle className="w-4 h-4" />
-            停止研究
+            {cancelling ? "停止中..." : "停止研究"}
           </Button>
         )}
       </div>
