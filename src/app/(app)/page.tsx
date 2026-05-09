@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import useSWR from "swr";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, Loader2 } from "lucide-react";
+import { TrendingUp, Loader2, Trash2 } from "lucide-react";
 
 type StudyStatus =
   | "DRAFT"
@@ -97,7 +98,44 @@ function MetricCell({
   );
 }
 
-function CompletedStudyCard({ study }: { study: DashboardStudy }) {
+function DeleteIconButton({
+  onDelete,
+  busy,
+}: {
+  onDelete: () => void;
+  busy: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="删除研究"
+      title="删除研究"
+      disabled={busy}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDelete();
+      }}
+      className="inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+    >
+      {busy ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Trash2 className="h-3.5 w-3.5" />
+      )}
+    </button>
+  );
+}
+
+function CompletedStudyCard({
+  study,
+  onDelete,
+  deleting,
+}: {
+  study: DashboardStudy;
+  onDelete: (id: string) => void;
+  deleting: boolean;
+}) {
   const m = study.result?.metrics;
   const strat = m?.strategy;
   const spy = m?.spy;
@@ -128,6 +166,10 @@ function CompletedStudyCard({ study }: { study: DashboardStudy }) {
             <Badge variant={STATUS_BADGE[study.status]}>
               {STATUS_LABEL[study.status]}
             </Badge>
+            <DeleteIconButton
+              busy={deleting}
+              onDelete={() => onDelete(study.id)}
+            />
           </div>
         </div>
       </CardHeader>
@@ -181,7 +223,15 @@ function CompletedStudyCard({ study }: { study: DashboardStudy }) {
   );
 }
 
-function PendingStudyCard({ study }: { study: DashboardStudy }) {
+function PendingStudyCard({
+  study,
+  onDelete,
+  deleting,
+}: {
+  study: DashboardStudy;
+  onDelete: (id: string) => void;
+  deleting: boolean;
+}) {
   const href =
     study.status === "RUNNING"
       ? `/studies/${study.id}/running`
@@ -198,9 +248,15 @@ function PendingStudyCard({ study }: { study: DashboardStudy }) {
               {study.hypothesis}
             </p>
           </div>
-          <Badge variant={STATUS_BADGE[study.status]}>
-            {STATUS_LABEL[study.status]}
-          </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Badge variant={STATUS_BADGE[study.status]}>
+              {STATUS_LABEL[study.status]}
+            </Badge>
+            <DeleteIconButton
+              busy={deleting}
+              onDelete={() => onDelete(study.id)}
+            />
+          </div>
         </div>
       </CardHeader>
       <CardContent className="px-4 pb-4">
@@ -269,10 +325,11 @@ function ActiveStudyBanner({ study }: { study: DashboardStudy }) {
 }
 
 export default function Dashboard() {
-  const { data, error, isLoading } = useSWR<{ studies: DashboardStudy[] }>(
-    "/api/studies",
-    fetcher,
-  );
+  const { data, error, isLoading, mutate } = useSWR<{
+    studies: DashboardStudy[];
+  }>("/api/studies", fetcher, {
+    refreshInterval: 5000,
+  });
 
   const studies = data?.studies ?? [];
   const running = studies.find((s) => s.status === "RUNNING");
@@ -280,6 +337,33 @@ export default function Dashboard() {
   const pending = studies.filter(
     (s) => s.status === "DRAFT" || s.status === "PLANNED",
   );
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete(id: string) {
+    if (
+      !window.confirm(
+        "确认删除这条研究？相关计划、进度和结果都会被一并删除，无法恢复。",
+      )
+    ) {
+      return;
+    }
+    setDeleteError(null);
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/studies/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `删除失败 (HTTP ${res.status})`);
+      }
+      await mutate();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "删除失败");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -314,6 +398,11 @@ export default function Dashboard() {
           加载失败：{(error as Error).message}
         </div>
       )}
+      {deleteError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+          {deleteError}
+        </div>
+      )}
 
       {/* Active running banner */}
       {running && <ActiveStudyBanner study={running} />}
@@ -341,7 +430,12 @@ export default function Dashboard() {
           <h2 className="text-sm font-semibold text-gray-700 mb-3">待启动 / 草稿</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {pending.map((s) => (
-              <PendingStudyCard key={s.id} study={s} />
+              <PendingStudyCard
+                key={s.id}
+                study={s}
+                onDelete={handleDelete}
+                deleting={deletingId === s.id}
+              />
             ))}
           </div>
         </div>
@@ -353,7 +447,12 @@ export default function Dashboard() {
           <h2 className="text-sm font-semibold text-gray-700 mb-3">近期研究</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {completed.map((s) => (
-              <CompletedStudyCard key={s.id} study={s} />
+              <CompletedStudyCard
+                key={s.id}
+                study={s}
+                onDelete={handleDelete}
+                deleting={deletingId === s.id}
+              />
             ))}
           </div>
         </div>

@@ -19,6 +19,10 @@ interface ApiStudy {
   benchmark: string;
   txCostBps: number;
   status: string;
+  progress: {
+    currentStep: number;
+    updatedAt: string;
+  } | null;
 }
 
 const fetcher = (url: string) =>
@@ -148,7 +152,7 @@ export default function RunningPage() {
   const params = useParams<{ id: string }>();
   const studyId = params.id;
 
-  const { data, error, isLoading } = useSWR<{ study: ApiStudy }>(
+  const { data, error, isLoading, mutate } = useSWR<{ study: ApiStudy }>(
     studyId ? `/api/studies/${studyId}` : null,
     fetcher,
   );
@@ -161,13 +165,28 @@ export default function RunningPage() {
   const [persisting, setPersisting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const persistedRef = useRef(false);
+  const restoredRef = useRef(false);
+  const startingRef = useRef(false);
   const logScrollRef = useRef<HTMLDivElement>(null);
 
   const runStart = useMemo(() => new Date(), []);
 
+  // Restore animation position from DB on first load. If the user refreshes
+  // mid-run, we resume from the start of the in-flight step instead of
+  // replaying from step 1.
+  useEffect(() => {
+    if (!study || restoredRef.current) return;
+    restoredRef.current = true;
+    const saved = study.progress?.currentStep;
+    if (typeof saved === "number" && saved > 0 && saved < STEPS_ZH.length) {
+      setSimTime(CUM_ENDS[saved - 1]);
+    }
+  }, [study]);
+
   // If the study is already COMPLETED (e.g. user revisited the running page
   // after finishing), forward to the result page instead of re-running the
   // simulation. CANCELLED studies stay on this page in stopped state.
+  // DRAFT/PLANNED means progress was never initialized — auto-start it.
   useEffect(() => {
     if (!study) return;
     if (study.status === "COMPLETED") {
@@ -176,8 +195,27 @@ export default function RunningPage() {
     }
     if (study.status === "CANCELLED" && !stopped) {
       setStopped(true);
+      return;
     }
-  }, [study, router, stopped]);
+    if (
+      (study.status === "DRAFT" || study.status === "PLANNED") &&
+      !startingRef.current
+    ) {
+      startingRef.current = true;
+      void (async () => {
+        try {
+          const res = await fetch(`/api/studies/${study.id}/start`, {
+            method: "POST",
+          });
+          if (!res.ok) throw new Error(`启动研究失败 (HTTP ${res.status})`);
+          await mutate();
+        } catch (err) {
+          setErrorMsg(err instanceof Error ? err.message : "启动研究失败");
+          startingRef.current = false;
+        }
+      })();
+    }
+  }, [study, router, stopped, mutate]);
 
   useEffect(() => {
     if (stopped || !study) return;
