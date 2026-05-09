@@ -93,6 +93,12 @@ AUTH_TRUST_HOST=true
 # 第六节会创建 OAuth App 拿到这两个值
 AUTH_GITHUB_ID=
 AUTH_GITHUB_SECRET=
+
+# DeepSeek API key（plan / conclusion 生成用）
+# 在 https://platform.deepseek.com/api_keys 创建
+DEEPSEEK_API_KEY=
+# 可选：默认 deepseek-chat，可改成 deepseek-reasoner
+AI_MODEL=
 ```
 
 `.env` 已在 `.gitignore` 中，**绝不要**提交进 Git。

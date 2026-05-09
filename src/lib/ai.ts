@@ -1,22 +1,27 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 
 // Lazy singleton — instantiating at module load would crash if the env var is
 // missing during local dev, even on routes that don't need AI.
-let _client: Anthropic | null = null;
-function getClient(): Anthropic {
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
   if (_client) return _client;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     throw new Error(
-      "ANTHROPIC_API_KEY is not set. Configure it in .env.local for dev or in /root/ai-quant-copilot/.env on prod.",
+      "DEEPSEEK_API_KEY is not set. Configure it in .env.local for dev or in /root/ai-quant-copilot/.env on prod.",
     );
   }
-  _client = new Anthropic({ apiKey });
+  _client = new OpenAI({
+    apiKey,
+    baseURL: "https://api.deepseek.com",
+  });
   return _client;
 }
 
-const MODEL = "claude-sonnet-4-6";
+// `deepseek-chat` is V3-0324; `deepseek-reasoner` (R1) is also acceptable but
+// slower and pricier. Allow override so deployments can pin a model.
+const MODEL = process.env.AI_MODEL || "deepseek-chat";
 
 // ============================================================
 // Per-user per-day quota — cheap protection against runaway costs.
@@ -149,31 +154,22 @@ export async function* streamStudyPlan(
   study: PlanInputStudy,
 ): AsyncGenerator<string, void, void> {
   const client = getClient();
-  const stream = client.messages.stream({
+  // `include_usage` makes DeepSeek emit a final chunk with token totals; we
+  // don't currently store them but the option keeps the door open.
+  const stream = await client.chat.completions.create({
     model: MODEL,
+    stream: true,
+    stream_options: { include_usage: true },
     max_tokens: 2048,
-    system: [
-      {
-        type: "text",
-        text: PLAN_SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
     messages: [
-      {
-        role: "user",
-        content: buildUserMessage(study),
-      },
+      { role: "system", content: PLAN_SYSTEM_PROMPT },
+      { role: "user", content: buildUserMessage(study) },
     ],
   });
 
-  for await (const event of stream) {
-    if (
-      event.type === "content_block_delta" &&
-      event.delta.type === "text_delta"
-    ) {
-      yield event.delta.text;
-    }
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) yield delta;
   }
 }
 
@@ -240,19 +236,15 @@ const CONCLUSION_SYSTEM_PROMPT = `你是一名资深量化分析师，需要根�
 风格：先给一个有判断的总评，再给可操作的洞察。避免空话和"显著优于市场"等无信息表述。
 受众：会读策略，但希望专家解读结果的投资经理。
 
-你的输出必须严格按下面 2 个 H2 章节，章节标题保持完全一致：
+你必须返回严格的 JSON 对象，schema 如下，**不要输出任何额外文字、Markdown 或代码围栏**：
+{
+  "conclusion": "1 段（3-5 句话）的整体表现总评：是否击败基准、风险/收益是否合理、值不值得继续深入研究。结尾必须包含'建议保留 / 建议改进 / 建议放弃'之一。",
+  "aiExplanation": [
+    "4-6 条要点字符串，每条覆盖一个具体观察：命中较好的因子或区间（带数字）、失败/风险点（如最大回撤、特定年度跑输等，带数字）、与基准的关键差异、后续研究建议（如增加因子、调整再平衡频率、换股票池等）。"
+  ]
+}
 
-## 结论
-用 1 个段落（3-5 句话）总结策略的整体表现：是否击败基准、风险/收益是否合理、值不值得继续深入研究。明确给出"建议保留 / 建议改进 / 建议放弃"之一作为收尾判断。
-
-## 要点
-用 4-6 条无序列表（"- " 开头），每条覆盖一个具体观察：
-- 命中较好的因子或区间，并给数字；
-- 失败/风险点（如最大回撤、特定年度跑输等），并给数字；
-- 与基准对比的关键差异；
-- 后续研究建议（如增加因子、调整再平衡频率、换股票池等）。
-
-不要写小标题、表格或代码块。`;
+aiExplanation 必须是字符串数组，长度 4-6。每条不要带前缀符号（如 "- " 或 "* "），保持纯文本。`;
 
 export interface ConclusionInputResult {
   metrics: unknown;
@@ -282,7 +274,7 @@ function buildConclusionUserMessage(
       ? study.endDate.slice(0, 10)
       : study.endDate.toISOString().slice(0, 10);
   return [
-    "请基于以下回测结果生成解读：",
+    "请基于以下回测结果生成解读，按指定 JSON schema 输出：",
     "",
     `<hypothesis>${study.hypothesis}</hypothesis>`,
     `<universe>${study.universe}</universe>`,
@@ -309,39 +301,17 @@ export interface ParsedStudyConclusion {
   aiExplanation: string[];
 }
 
-function parseStudyConclusion(markdown: string): ParsedStudyConclusion {
-  const sections: Record<string, string> = {};
-  const parts = markdown.split(/^##\s+(.+?)\s*$/m);
-  for (let i = 1; i < parts.length; i += 2) {
-    sections[parts[i].trim()] = (parts[i + 1] ?? "").trim();
-  }
-
-  const conclusion = sections["结论"] ?? "";
-  const pointsRaw = sections["要点"] ?? "";
-  const aiExplanation = pointsRaw
-    .split("\n")
-    .map((line) => line.replace(/^\s*[-*]\s+/, "").trim())
-    .filter((line) => line.length > 0);
-
-  return { conclusion, aiExplanation };
-}
-
 export async function generateStudyConclusion(
   study: ConclusionInputStudy,
   result: ConclusionInputResult,
 ): Promise<ParsedStudyConclusion> {
   const client = getClient();
-  const message = await client.messages.create({
+  const response = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 1500,
-    system: [
-      {
-        type: "text",
-        text: CONCLUSION_SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
+    response_format: { type: "json_object" },
     messages: [
+      { role: "system", content: CONCLUSION_SYSTEM_PROMPT },
       {
         role: "user",
         content: buildConclusionUserMessage(study, result),
@@ -349,19 +319,33 @@ export async function generateStudyConclusion(
     ],
   });
 
-  const text = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("");
-
-  const parsed = parseStudyConclusion(text);
-  if (!parsed.conclusion && parsed.aiExplanation.length === 0) {
-    // Model deviated from the schema — fall back to raw text so we don't ship
-    // an empty UI. The route will still record this as a successful call.
-    return {
-      conclusion: text.trim(),
-      aiExplanation: [],
-    };
+  const raw = response.choices[0]?.message?.content?.trim() ?? "";
+  if (!raw) {
+    return { conclusion: "", aiExplanation: [] };
   }
-  return parsed;
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      conclusion?: unknown;
+      aiExplanation?: unknown;
+    };
+    const conclusion =
+      typeof parsed.conclusion === "string" ? parsed.conclusion.trim() : "";
+    const aiExplanation = Array.isArray(parsed.aiExplanation)
+      ? parsed.aiExplanation
+          .filter((p): p is string => typeof p === "string")
+          .map((p) => p.replace(/^\s*[-*]\s+/, "").trim())
+          .filter((p) => p.length > 0)
+      : [];
+
+    if (!conclusion && aiExplanation.length === 0) {
+      // JSON parsed but had neither field — fall back to raw text so the UI
+      // shows something instead of an empty card.
+      return { conclusion: raw, aiExplanation: [] };
+    }
+    return { conclusion, aiExplanation };
+  } catch {
+    // Model deviated from JSON mode — show the raw text rather than 500.
+    return { conclusion: raw, aiExplanation: [] };
+  }
 }

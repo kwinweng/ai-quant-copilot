@@ -105,7 +105,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
 }
 
 // Wrap the original handler so unexpected init errors (e.g., missing
-// ANTHROPIC_API_KEY thrown by the SDK before the stream opens) still return a
+// DEEPSEEK_API_KEY thrown by the SDK before the stream opens) still return a
 // JSON 500 instead of a hung connection.
 export async function GET() {
   return serverError("Use POST");

@@ -449,7 +449,7 @@ function AIConclusionCard({
               生成中…
             </>
           ) : (
-            "Claude Sonnet 4.6"
+            "AI 自动生成"
           )}
         </span>
       </div>
