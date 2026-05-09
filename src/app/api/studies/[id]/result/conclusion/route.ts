@@ -11,6 +11,7 @@ import {
   generateStudyConclusion,
   assertUsageQuota,
   incrementUsage,
+  describeAiError,
 } from "@/lib/ai";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -86,8 +87,6 @@ export async function POST(_req: Request, ctx: Ctx) {
     return NextResponse.json({ result: updated });
   } catch (err) {
     console.error("POST /api/studies/[id]/result/conclusion failed", err);
-    return serverError(
-      err instanceof Error ? err.message : "AI 结论生成失败",
-    );
+    return serverError(describeAiError(err));
   }
 }

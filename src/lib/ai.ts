@@ -24,6 +24,58 @@ function getClient(): OpenAI {
 const MODEL = process.env.AI_MODEL || "deepseek-chat";
 
 // ============================================================
+// Error normalization — turns DeepSeek/OpenAI errors into terse
+// Chinese messages safe to show end users. The raw `.message`
+// from the SDK can include the API key fragment, request URL,
+// or upstream stack frames — never surface those to the browser.
+// ============================================================
+
+function scrubSecrets(msg: string): string {
+  return msg
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***")
+    .replace(/Bearer\s+\S+/gi, "Bearer ***");
+}
+
+export function describeAiError(err: unknown): string {
+  // APIConnectionError extends APIError but has no HTTP status — handle first.
+  if (err instanceof OpenAI.APIConnectionError) {
+    return "无法连接 AI 服务，请检查网络后重试";
+  }
+  if (err instanceof OpenAI.APIError) {
+    const status = err.status;
+    if (status === 401) {
+      return "AI 服务认证失败，请联系管理员检查 API Key 配置";
+    }
+    if (status === 402) {
+      return "AI 账户余额不足，请联系管理员充值";
+    }
+    if (status === 403) {
+      return "AI 服务拒绝访问，请联系管理员检查权限";
+    }
+    if (status === 404) {
+      return "AI 模型不存在或已下线，请联系管理员";
+    }
+    if (status === 429) {
+      return "AI 服务繁忙或限流，请稍后重试";
+    }
+    if (status === 400 || status === 422) {
+      return "AI 请求被拒绝（参数错误），请重试或联系管理员";
+    }
+    if (typeof status === "number" && status >= 500) {
+      return "AI 服务暂时不可用，请稍后重试";
+    }
+    return `AI 服务错误（HTTP ${status ?? "未知"}）`;
+  }
+  if (err instanceof Error) {
+    if (err.message.includes("DEEPSEEK_API_KEY")) {
+      return "AI 服务未配置，请联系管理员";
+    }
+    return scrubSecrets(err.message);
+  }
+  return "AI 调用失败";
+}
+
+// ============================================================
 // Per-user per-day quota — cheap protection against runaway costs.
 // ============================================================
 

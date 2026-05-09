@@ -11,6 +11,7 @@ import {
   parseStudyPlan,
   assertUsageQuota,
   incrementUsage,
+  describeAiError,
 } from "@/lib/ai";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -83,8 +84,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
         );
       } catch (err) {
         console.error("POST /api/studies/[id]/plan/generate failed", err);
-        const message =
-          err instanceof Error ? err.message : "AI 计划生成失败";
+        const message = describeAiError(err);
         controller.enqueue(
           encoder.encode(sseFrame({ type: "error", message })),
         );
