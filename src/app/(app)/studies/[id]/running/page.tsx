@@ -1,12 +1,25 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Check, Loader2, StopCircle } from "lucide-react";
-import { DEMO_STUDIES } from "../../../../../../prisma/seed-data";
+import { AlertCircle, Check, Loader2, StopCircle } from "lucide-react";
+
+interface StoredStep {
+  name: string;
+  description?: string;
+  status: "pending" | "running" | "complete" | "error";
+  durationSec?: number;
+  note?: string;
+}
+
+interface StoredLog {
+  ts: string;
+  message: string;
+  level: "info" | "warning" | "error";
+}
 
 interface ApiStudy {
   id: string;
@@ -21,6 +34,9 @@ interface ApiStudy {
   status: string;
   progress: {
     currentStep: number;
+    steps: StoredStep[] | null;
+    logs: StoredLog[] | null;
+    startedAt: string;
     updatedAt: string;
   } | null;
 }
@@ -31,120 +47,19 @@ const fetcher = (url: string) =>
     return r.json();
   });
 
-const STEPS_ZH = [
-  { id: 1, name: "校验参数", description: "检查股票池、日期范围和因子定义" },
-  { id: 2, name: "获取价格数据", description: "下载成分股 OHLCV" },
-  { id: 3, name: "获取基本面数据", description: "加载 ROIC、ROE、毛利率、PE、PB、PS" },
-  { id: 4, name: "计算因子得分", description: "按再平衡频率计算复合 z-score" },
-  { id: 5, name: "构建投资组合", description: "选择前 20%，应用集中度限制" },
-  { id: 6, name: "运行回测引擎", description: "模拟每日盈亏，含交易成本与再平衡" },
-  { id: 7, name: "计算风险指标", description: "CAGR、Sharpe、Max Drawdown、Calmar、IR" },
-  { id: 8, name: "生成 AI 报告", description: "AI 综合结果、因子归因、改进建议" },
-];
-
-const SIM_SPEED = 4;
-const STEP_SIM_DURATIONS = [2, 6, 8, 8, 6, 10, 6, 6];
-const STEP_DISPLAY_DURATIONS = [2, 38, 54, 47, 32, 65, 28, 31];
-const SIM_TOTAL = STEP_SIM_DURATIONS.reduce((a, b) => a + b, 0);
-
-const STEP_FILE_INFO: { files: string; size: string }[] = [
-  { files: "1 / 1 文件", size: "8 KB" },
-  { files: "约 1023 个标的", size: "2.3 MB" },
-  { files: "6 / 6 数据源", size: "14.7 MB" },
-  { files: "40 / 40 季度", size: "1.2 MB" },
-  { files: "40 / 40 组合", size: "320 KB" },
-  { files: "2515 个交易日", size: "—" },
-  { files: "12 / 12 指标", size: "—" },
-  { files: "1 / 1 报告", size: "—" },
-];
-
-const LOG_TEMPLATES: string[][] = [
-  ["参数校验通过", "因子定义合法"],
-  ["开始下载价格数据", "已加载 25%", "已加载 60%", "已加载 100%"],
-  ["开始加载基本面数据", "ROIC 完成", "ROE / 毛利率 完成", "PE / PB / PS 完成"],
-  ["计算 z-score", "复合因子打分完成"],
-  ["筛选 top 20%", "应用单票仓位上限", "组合构建完成"],
-  ["回测进行中…", "已完成 50% 区间", "回测完成"],
-  ["计算 CAGR / Sharpe", "计算 Max Drawdown", "计算 IR / Calmar"],
-  ["AI 分析归因", "生成结论摘要", "报告生成完成"],
-];
-
-function cumEnds(durations: number[]): number[] {
-  return durations.reduce<number[]>((acc, d, i) => {
-    acc.push((acc[i - 1] ?? 0) + d);
-    return acc;
-  }, []);
+function formatHHMMSS(ts: string): string {
+  const d = new Date(ts);
+  return `${d.getHours().toString().padStart(2, "0")}:${d
+    .getMinutes()
+    .toString()
+    .padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`;
 }
 
-const CUM_ENDS = cumEnds(STEP_SIM_DURATIONS);
-
-type StepStatus = "complete" | "running" | "pending";
-
-function getStatuses(simTime: number): StepStatus[] {
-  return STEP_SIM_DURATIONS.map((d, i) => {
-    const end = CUM_ENDS[i];
-    const start = end - d;
-    if (simTime >= end) return "complete";
-    if (simTime >= start) return "running";
-    return "pending";
-  });
-}
-
-function formatClock(start: Date, simSeconds: number): string {
-  const t = new Date(start.getTime() + simSeconds * 1000);
-  return `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}:${t.getSeconds().toString().padStart(2, "0")}`;
-}
-
-type LogEntry = { ts: string; msg: string; type: "info" | "success" | "start" };
-
-function generateLogs(simTime: number, runStart: Date): LogEntry[] {
-  const logs: LogEntry[] = [];
-  for (let i = 0; i < STEP_SIM_DURATIONS.length; i++) {
-    const start = i === 0 ? 0 : CUM_ENDS[i - 1];
-    const end = CUM_ENDS[i];
-    if (simTime < start) break;
-
-    logs.push({
-      ts: formatClock(runStart, start),
-      msg: `▶ 步骤 ${i + 1}/${STEPS_ZH.length}: ${STEPS_ZH[i].name}`,
-      type: "start",
-    });
-
-    const progress = Math.min(1, (simTime - start) / (end - start));
-    const templates = LOG_TEMPLATES[i];
-    for (let j = 0; j < templates.length; j++) {
-      const threshold = (j + 1) / (templates.length + 1);
-      if (progress > threshold) {
-        logs.push({
-          ts: formatClock(runStart, start + (end - start) * threshold),
-          msg: `  ${templates[j]}`,
-          type: "info",
-        });
-      }
-    }
-
-    if (progress >= 1) {
-      logs.push({
-        ts: formatClock(runStart, end),
-        msg: `  ✓ 步骤 ${i + 1} 完成 (${STEP_DISPLAY_DURATIONS[i]}s)`,
-        type: "success",
-      });
-    }
-  }
-  return logs;
-}
-
-function buildResultPayload() {
-  const tpl = DEMO_STUDIES[0];
-  return {
-    conclusion: tpl.conclusion,
-    metrics: tpl.metrics,
-    equityCurve: tpl.equityCurve,
-    drawdown: tpl.drawdown,
-    annualReturns: tpl.annualReturns,
-    factorDiagnostics: tpl.factorDiagnostics,
-    aiExplanation: tpl.aiExplanation,
-  };
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
 export default function RunningPage() {
@@ -155,38 +70,26 @@ export default function RunningPage() {
   const { data, error, isLoading, mutate } = useSWR<{ study: ApiStudy }>(
     studyId ? `/api/studies/${studyId}` : null,
     fetcher,
+    {
+      // Poll while the backtest is running. SWR auto-pauses when the tab is
+      // backgrounded, but for this page we want updates as long as the user
+      // is here.
+      refreshInterval: 2000,
+      revalidateOnFocus: true,
+    },
   );
   const study = data?.study;
+  const progress = study?.progress ?? null;
+  const steps = progress?.steps ?? [];
+  const logs = progress?.logs ?? [];
 
-  const [simTime, setSimTime] = useState(0);
-  const [realElapsed, setRealElapsed] = useState(0);
   const [stopped, setStopped] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [persisting, setPersisting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const persistedRef = useRef(false);
-  const restoredRef = useRef(false);
   const startingRef = useRef(false);
   const logScrollRef = useRef<HTMLDivElement>(null);
 
-  const runStart = useMemo(() => new Date(), []);
-
-  // Restore animation position from DB on first load. If the user refreshes
-  // mid-run, we resume from the start of the in-flight step instead of
-  // replaying from step 1.
-  useEffect(() => {
-    if (!study || restoredRef.current) return;
-    restoredRef.current = true;
-    const saved = study.progress?.currentStep;
-    if (typeof saved === "number" && saved > 0 && saved < STEPS_ZH.length) {
-      setSimTime(CUM_ENDS[saved - 1]);
-    }
-  }, [study]);
-
-  // If the study is already COMPLETED (e.g. user revisited the running page
-  // after finishing), forward to the result page instead of re-running the
-  // simulation. CANCELLED studies stay on this page in stopped state.
-  // DRAFT/PLANNED means progress was never initialized — auto-start it.
+  // Auto-start: if the study has never been kicked off, POST /start once.
   useEffect(() => {
     if (!study) return;
     if (study.status === "COMPLETED") {
@@ -197,6 +100,7 @@ export default function RunningPage() {
       setStopped(true);
       return;
     }
+    if (study.status === "FAILED") return; // surfaced inline as error banner
     if (
       (study.status === "DRAFT" || study.status === "PLANNED") &&
       !startingRef.current
@@ -217,85 +121,33 @@ export default function RunningPage() {
     }
   }, [study, router, stopped, mutate]);
 
-  useEffect(() => {
-    if (stopped || !study) return;
-    if (study.status !== "RUNNING") return;
-    const interval = setInterval(() => {
-      setRealElapsed((s) => s + 1);
-      setSimTime((s) => {
-        const next = s + SIM_SPEED;
-        return next >= SIM_TOTAL ? SIM_TOTAL : next;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [stopped, study]);
-
-  // Push periodic progress updates to the API every ~5 sim-seconds
-  const lastSyncedStep = useRef(-1);
-  useEffect(() => {
-    if (!study) return;
-    const statuses = getStatuses(simTime);
-    const currentStep = statuses.findIndex((s) => s !== "complete");
-    const stepIdx = currentStep === -1 ? STEPS_ZH.length - 1 : currentStep;
-    if (stepIdx !== lastSyncedStep.current) {
-      lastSyncedStep.current = stepIdx;
-      void fetch(`/api/studies/${study.id}/progress`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentStep: stepIdx,
-          steps: statuses.map((s, i) => ({
-            name: STEPS_ZH[i].name,
-            status: s,
-          })),
-        }),
-      }).catch(() => {});
-    }
-  }, [simTime, study]);
-
-  const statuses = getStatuses(simTime);
-  const isComplete = simTime >= SIM_TOTAL;
-  const runningIdx = statuses.findIndex((s) => s === "running");
-  const progress = Math.round((simTime / SIM_TOTAL) * 100);
-  const secsRemaining = Math.max(
-    0,
-    Math.ceil((SIM_TOTAL - simTime) / SIM_SPEED),
-  );
-  const logs = generateLogs(simTime, runStart);
-
+  // Scroll logs to bottom when they grow.
   useEffect(() => {
     if (logScrollRef.current) {
       logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
     }
   }, [logs.length]);
 
-  // On completion, persist result then navigate to result page
+  // Real wall-clock since startedAt for display.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!isComplete || !study || persistedRef.current) return;
-    persistedRef.current = true;
-    setPersisting(true);
-    (async () => {
-      try {
-        const res = await fetch(`/api/studies/${study.id}/result`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildResultPayload()),
-        });
-        if (!res.ok) throw new Error(`保存结果失败 (HTTP ${res.status})`);
-        setTimeout(() => router.push(`/studies/${study.id}/result`), 800);
-      } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : "保存结果失败");
-        setPersisting(false);
-        persistedRef.current = false;
-      }
-    })();
-  }, [isComplete, study, router]);
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const startedAtMs = progress?.startedAt
+    ? new Date(progress.startedAt).getTime()
+    : null;
+  const elapsedMs = startedAtMs ? now - startedAtMs : 0;
 
-  const formatElapsed = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, "0")}`;
-  };
+  const completeCount = steps.filter((s) => s.status === "complete").length;
+  const total = steps.length || 8;
+  const overallPct =
+    total > 0 ? Math.min(100, Math.round((completeCount / total) * 100)) : 0;
+  const runningStep = steps.find((s) => s.status === "running");
+  const erroredStep = steps.find((s) => s.status === "error");
+  const isRunning = study?.status === "RUNNING";
+  const isComplete = study?.status === "COMPLETED";
+  const isFailed = study?.status === "FAILED";
 
   if (isLoading) {
     return (
@@ -318,72 +170,108 @@ export default function RunningPage() {
     );
   }
 
+  const headerBadge = isComplete ? (
+    <Badge variant="success">已完成</Badge>
+  ) : isFailed ? (
+    <Badge variant="danger">失败</Badge>
+  ) : stopped ? (
+    <Badge variant="muted">已停止</Badge>
+  ) : (
+    <Badge variant="running">进行中</Badge>
+  );
+
+  const headerStatus = isComplete
+    ? "全部步骤已完成"
+    : isFailed
+      ? `失败于「${erroredStep?.name ?? "未知步骤"}」`
+      : stopped
+        ? `已停止于步骤 ${(progress?.currentStep ?? 0) + 1}`
+        : runningStep
+          ? `Step ${(progress?.currentStep ?? 0) + 1} of ${total} · ${runningStep.name}`
+          : isRunning
+            ? "准备中…"
+            : "等待启动";
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-gray-900">{study.title}</h1>
-          {isComplete ? (
-            <Badge variant="success">已完成</Badge>
-          ) : stopped ? (
-            <Badge variant="muted">已停止</Badge>
-          ) : (
-            <Badge variant="running">进行中</Badge>
-          )}
+          {headerBadge}
           <span className="text-xs text-gray-400 font-mono">{study.id}</span>
         </div>
         <span className="text-sm text-gray-500 shrink-0">
-          已用时 {formatElapsed(realElapsed)}
+          {startedAtMs ? `已用时 ${formatElapsed(elapsedMs)}` : "—"}
         </span>
       </div>
 
-      {errorMsg && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
-          {errorMsg}
+      {(errorMsg || isFailed) && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-start gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="font-medium">回测失败</div>
+            <div className="mt-0.5 text-red-600">
+              {errorMsg ??
+                logs.findLast?.((l) => l.level === "error")?.message ??
+                "请查看日志了解详情"}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="text-xs text-red-700 hover:text-red-900 underline shrink-0"
+            onClick={async () => {
+              setErrorMsg(null);
+              startingRef.current = false;
+              try {
+                const res = await fetch(`/api/studies/${study.id}/start`, {
+                  method: "POST",
+                });
+                if (!res.ok) throw new Error(`重试失败 (HTTP ${res.status})`);
+                await mutate();
+              } catch (err) {
+                setErrorMsg(err instanceof Error ? err.message : "重试失败");
+              }
+            }}
+          >
+            重试
+          </button>
         </div>
       )}
 
-      {/* Overall progress bar */}
+      {/* Overall progress */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-gray-700">
-            {isComplete
-              ? persisting
-                ? "正在保存结果…"
-                : "全部步骤已完成"
-              : stopped
-                ? `已停止于步骤 ${runningIdx + 1}`
-                : runningIdx >= 0
-                  ? `Step ${runningIdx + 1} of ${STEPS_ZH.length} · ${STEPS_ZH[runningIdx].name}`
-                  : "准备中..."}
-          </span>
+          <span className="text-sm font-medium text-gray-700">{headerStatus}</span>
           <span className="text-xs text-gray-500">
             {isComplete
-              ? "加载结果中..."
-              : stopped
-                ? "已暂停"
-                : `约 ${secsRemaining} 秒剩余`}
+              ? "加载结果中…"
+              : isFailed
+                ? "已停止"
+                : stopped
+                  ? "已暂停"
+                  : "实时更新"}
           </span>
         </div>
         <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
           <div
-            className="h-full rounded-full transition-all duration-1000"
+            className="h-full rounded-full transition-all duration-700"
             style={{
-              width: `${progress}%`,
+              width: `${overallPct}%`,
               backgroundColor: isComplete
                 ? "#22c55e"
-                : stopped
-                  ? "#9ca3af"
-                  : "#3b82f6",
+                : isFailed
+                  ? "#ef4444"
+                  : stopped
+                    ? "#9ca3af"
+                    : "#3b82f6",
             }}
           />
         </div>
         <div className="flex justify-between text-xs text-gray-400 mt-1.5">
-          <span>{progress}%</span>
+          <span>{overallPct}%</span>
           <span>
-            {statuses.filter((s) => s === "complete").length} /{" "}
-            {STEPS_ZH.length} 步完成
+            {completeCount} / {total} 步完成
           </span>
         </div>
       </div>
@@ -396,34 +284,37 @@ export default function RunningPage() {
             <h2 className="text-sm font-semibold text-gray-900">流水线步骤</h2>
           </div>
           <div className="divide-y divide-gray-100">
-            {STEPS_ZH.map((step, i) => {
-              const status = statuses[i];
-              const stepStart = i === 0 ? 0 : CUM_ENDS[i - 1];
-              const stepProgress =
-                status === "running"
-                  ? Math.min(
-                      100,
-                      Math.round(
-                        ((simTime - stepStart) / STEP_SIM_DURATIONS[i]) * 100,
-                      ),
-                    )
-                  : 0;
+            {(steps.length === 0
+              ? Array.from({ length: 8 }, () => ({
+                  name: "等待初始化…",
+                  description: undefined,
+                  status: "pending" as const,
+                  durationSec: undefined,
+                  note: undefined,
+                }))
+              : steps
+            ).map((step, i) => {
               return (
-                <div key={step.id} className="px-4 py-3 flex items-start gap-3">
+                <div key={i} className="px-4 py-3 flex items-start gap-3">
                   <div className="shrink-0 mt-0.5">
-                    {status === "complete" && (
+                    {step.status === "complete" && (
                       <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center">
                         <Check className="w-3.5 h-3.5 text-green-600" />
                       </div>
                     )}
-                    {status === "running" && (
+                    {step.status === "running" && (
                       <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
                         <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin" />
                       </div>
                     )}
-                    {status === "pending" && (
+                    {step.status === "pending" && (
                       <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center">
                         <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                      </div>
+                    )}
+                    {step.status === "error" && (
+                      <div className="w-6 h-6 rounded-full bg-red-100 flex items-center justify-center">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-600" />
                       </div>
                     )}
                   </div>
@@ -431,59 +322,43 @@ export default function RunningPage() {
                     <div className="flex items-center justify-between gap-2">
                       <p
                         className={`text-sm font-medium ${
-                          status === "pending"
+                          step.status === "pending"
                             ? "text-gray-400"
-                            : "text-gray-900"
+                            : step.status === "error"
+                              ? "text-red-700"
+                              : "text-gray-900"
                         }`}
                       >
-                        {step.id}. {step.name}
+                        {i + 1}. {step.name}
                       </p>
                       <span className="text-xs shrink-0">
-                        {status === "complete" && (
-                          <span className="text-gray-500">
-                            {STEP_DISPLAY_DURATIONS[i]}s
-                          </span>
+                        {step.status === "complete" && step.durationSec != null && (
+                          <span className="text-gray-500">{step.durationSec}s</span>
                         )}
-                        {status === "running" && (
-                          <span className="text-blue-600 font-medium">
-                            {stepProgress}%
-                          </span>
+                        {step.status === "running" && (
+                          <span className="text-blue-600 font-medium">运行中</span>
                         )}
-                        {status === "pending" && (
+                        {step.status === "pending" && (
                           <span className="text-gray-300">待执行</span>
+                        )}
+                        {step.status === "error" && (
+                          <span className="text-red-600 font-medium">失败</span>
                         )}
                       </span>
                     </div>
-                    <p
-                      className={`text-xs mt-0.5 ${
-                        status === "pending" ? "text-gray-400" : "text-gray-500"
-                      }`}
-                    >
-                      {step.description}
-                    </p>
-                    {status === "running" && (
-                      <>
-                        <div className="mt-2 h-1 bg-blue-50 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-blue-500 transition-all"
-                            style={{ width: `${stepProgress}%` }}
-                          />
-                        </div>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {STEP_FILE_INFO[i].files}
-                          {STEP_FILE_INFO[i].size !== "—" && (
-                            <span> · {STEP_FILE_INFO[i].size}</span>
-                          )}
-                        </p>
-                      </>
-                    )}
-                    {status === "complete" && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        {STEP_FILE_INFO[i].files}
-                        {STEP_FILE_INFO[i].size !== "—" && (
-                          <span> · {STEP_FILE_INFO[i].size}</span>
-                        )}
+                    {step.description && (
+                      <p
+                        className={`text-xs mt-0.5 ${
+                          step.status === "pending"
+                            ? "text-gray-400"
+                            : "text-gray-500"
+                        }`}
+                      >
+                        {step.description}
                       </p>
+                    )}
+                    {step.note && step.status !== "pending" && (
+                      <p className="text-xs text-gray-400 mt-1">{step.note}</p>
                     )}
                   </div>
                 </div>
@@ -540,30 +415,30 @@ export default function RunningPage() {
               className="px-3 py-2 max-h-[360px] overflow-y-auto bg-gray-900 font-mono text-xs leading-relaxed"
             >
               {logs.length === 0 ? (
-                <p className="text-gray-500 px-1">等待开始...</p>
+                <p className="text-gray-500 px-1">等待开始…</p>
               ) : (
                 logs.map((log, i) => (
                   <div key={i} className="flex gap-2 px-1 py-0.5">
-                    <span className="text-gray-500 shrink-0">[{log.ts}]</span>
+                    <span className="text-gray-500 shrink-0">
+                      [{formatHHMMSS(log.ts)}]
+                    </span>
                     <span
                       className={
-                        log.type === "success"
-                          ? "text-green-400"
-                          : log.type === "start"
-                            ? "text-blue-300"
+                        log.level === "error"
+                          ? "text-red-400"
+                          : log.level === "warning"
+                            ? "text-yellow-300"
                             : "text-gray-300"
                       }
                     >
-                      {log.msg}
+                      {log.message}
                     </span>
                   </div>
                 ))
               )}
-              {!isComplete && !stopped && (
+              {isRunning && !stopped && !isFailed && (
                 <div className="flex gap-2 px-1 py-0.5 animate-pulse">
-                  <span className="text-gray-500 shrink-0">
-                    [{formatClock(runStart, simTime)}]
-                  </span>
+                  <span className="text-gray-500 shrink-0">[…]</span>
                   <span className="text-gray-400">_</span>
                 </div>
               )}
@@ -573,18 +448,7 @@ export default function RunningPage() {
       </div>
 
       {/* Bottom actions */}
-      <div className="flex items-center justify-between pt-2">
-        <button
-          type="button"
-          className="text-sm text-blue-600 hover:underline"
-          onClick={() =>
-            logScrollRef.current?.scrollTo({
-              top: logScrollRef.current.scrollHeight,
-            })
-          }
-        >
-          查看完整日志 →
-        </button>
+      <div className="flex items-center justify-end pt-2 gap-2">
         {isComplete ? (
           <Button
             className="bg-blue-600 hover:bg-blue-700 text-white"
@@ -592,7 +456,7 @@ export default function RunningPage() {
           >
             查看结果 →
           </Button>
-        ) : stopped ? (
+        ) : isFailed || stopped ? (
           <Button
             variant="outline"
             className="border-gray-200 text-gray-700 hover:bg-gray-50"
@@ -606,7 +470,6 @@ export default function RunningPage() {
             disabled={cancelling}
             className="border-red-200 text-red-600 hover:bg-red-50 inline-flex items-center gap-1.5 disabled:opacity-50"
             onClick={async () => {
-              if (!study) return;
               setCancelling(true);
               setErrorMsg(null);
               try {
@@ -628,7 +491,7 @@ export default function RunningPage() {
             }}
           >
             <StopCircle className="w-4 h-4" />
-            {cancelling ? "停止中..." : "停止研究"}
+            {cancelling ? "停止中…" : "停止研究"}
           </Button>
         )}
       </div>

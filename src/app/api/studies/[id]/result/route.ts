@@ -5,6 +5,11 @@ import { requireUser, badRequest, notFound, serverError } from "@/lib/api";
 
 type Ctx = { params: Promise<{ id: string }> };
 
+// DEPRECATED since Phase 3. The running page no longer pushes mock results
+// from the client — the server-side runner in src/lib/backtest/runner.ts
+// upserts StudyResult after the real backtest completes. We keep this route
+// for ad-hoc admin / migration use; do not call it from new UI code.
+
 interface ResultBody {
   conclusion?: string;
   metrics?: unknown;

@@ -1,7 +1,13 @@
 # 部署指南 — 自有云服务器
 
-> 本指南覆盖 **Stage 2.1**：Next.js + PostgreSQL + Prisma + NextAuth v5（GitHub OAuth）。
+> 本指南覆盖 **Stage 2.1 + Phase 2.2 + Phase 3**：Next.js + PostgreSQL + Prisma + NextAuth v5（GitHub OAuth）+ DeepSeek API + Yahoo Finance 真实回测。
 > 生产环境为 DigitalOcean Singapore，域名 `aiquant.kwinweng.com`。
+
+## 出口网络要求
+
+- DeepSeek API：服务器需能访问 `api.deepseek.com`（HTTPS / 443）
+- Yahoo Finance（Phase 3 回测数据源）：服务器需能访问 `query1.finance.yahoo.com` 和 `query2.finance.yahoo.com`（HTTPS / 443），无需 API key、无需注册账号
+- 如部署在墙内，需为这两个域名走代理或 CDN 中转
 
 ## 前置条件
 

@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser, notFound, serverError } from "@/lib/api";
+import { runBacktest, BACKTEST_STEPS } from "@/lib/backtest/runner";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-const INITIAL_STEPS = [
-  { name: "Validate Parameters", status: "running" },
-  { name: "Fetch Price Data", status: "pending" },
-  { name: "Fetch Fundamental Data", status: "pending" },
-  { name: "Compute Factor Scores", status: "pending" },
-  { name: "Construct Portfolios", status: "pending" },
-  { name: "Run Backtest Engine", status: "pending" },
-  { name: "Compute Risk Metrics", status: "pending" },
-  { name: "Generate AI Report", status: "pending" },
-];
+const PENDING_STEPS = BACKTEST_STEPS.map((s) => ({
+  name: s.name,
+  description: s.description,
+  status: "pending" as const,
+}));
 
 export async function POST(_req: Request, ctx: Ctx) {
   const { session, response } = await requireUser();
@@ -24,9 +20,18 @@ export async function POST(_req: Request, ctx: Ctx) {
   try {
     const study = await prisma.study.findFirst({
       where: { id, userId: session!.user.id },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!study) return notFound("Study not found");
+
+    // If a backtest is already in flight, don't double-launch it. Returning
+    // the existing progress lets the running page resume.
+    if (study.status === "RUNNING") {
+      const progress = await prisma.studyProgress.findUnique({
+        where: { studyId: id },
+      });
+      return NextResponse.json({ progress, alreadyRunning: true });
+    }
 
     const now = new Date().toISOString();
     const progress = await prisma.studyProgress.upsert({
@@ -34,13 +39,14 @@ export async function POST(_req: Request, ctx: Ctx) {
       create: {
         studyId: id,
         currentStep: 0,
-        steps: INITIAL_STEPS,
-        logs: [{ ts: now, message: "Pipeline started", level: "info" }],
+        steps: PENDING_STEPS,
+        logs: [{ ts: now, message: "回测排队中…", level: "info" }],
       },
       update: {
         currentStep: 0,
-        steps: INITIAL_STEPS,
-        logs: [{ ts: now, message: "Pipeline restarted", level: "info" }],
+        steps: PENDING_STEPS,
+        logs: [{ ts: now, message: "回测重启中…", level: "info" }],
+        startedAt: new Date(),
       },
     });
 
@@ -48,6 +54,10 @@ export async function POST(_req: Request, ctx: Ctx) {
       where: { id },
       data: { status: "RUNNING" },
     });
+
+    // Fire-and-forget. The runner catches all errors and writes FAILED + logs
+    // to the DB, so we don't need to await or surface anything here.
+    void runBacktest(id);
 
     return NextResponse.json({ progress });
   } catch (err) {

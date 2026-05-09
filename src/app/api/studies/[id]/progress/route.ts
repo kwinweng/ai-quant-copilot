@@ -3,6 +3,11 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser, badRequest, notFound, serverError } from "@/lib/api";
 
+// DEPRECATED since Phase 3. Pre-Phase-3 the running page PATCHed progress as
+// it animated locally; the server-side backtest runner now owns all progress
+// writes (src/lib/backtest/runner.ts → setStep). Kept for back-compat with
+// any external clients; not used by current UI.
+
 type Ctx = { params: Promise<{ id: string }> };
 
 interface ProgressBody {
