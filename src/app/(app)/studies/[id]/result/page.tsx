@@ -1,12 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, Share2, Sparkles, ArrowLeft, Loader2 } from "lucide-react";
+import {
+  Download,
+  Share2,
+  Sparkles,
+  ArrowLeft,
+  Loader2,
+  RefreshCw,
+} from "lucide-react";
 import {
   LineChart,
   Line,
@@ -419,39 +426,90 @@ function FactorDiagnostics({
   );
 }
 
-function AIConclusionCard({ result }: { result: ApiResult }) {
+function AIConclusionCard({
+  result,
+  generating,
+  generationError,
+  onRetry,
+}: {
+  result: ApiResult;
+  generating: boolean;
+  generationError: string | null;
+  onRetry: () => void;
+}) {
   return (
     <div className="bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
       <div className="px-4 py-3 border-b border-blue-100 flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-blue-600" />
         <h3 className="text-sm font-semibold text-gray-900">AI 结论</h3>
-        <span className="text-xs text-gray-500 ml-auto">GPT-4o (mock)</span>
+        <span className="text-xs text-gray-500 ml-auto inline-flex items-center gap-1.5">
+          {generating ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              生成中…
+            </>
+          ) : (
+            "Claude Sonnet 4.6"
+          )}
+        </span>
       </div>
-      <div className="px-4 py-3">
+      <div className="px-4 py-3 space-y-2">
         <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
           {result.conclusion}
         </p>
+        {generationError && (
+          <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+            <span className="flex-1">{generationError}</span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-red-700 hover:text-red-900"
+              onClick={onRetry}
+            >
+              <RefreshCw className="h-3 w-3" />
+              重试
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function AIKeyPoints({ points }: { points: string[] }) {
-  if (!points || points.length === 0) return null;
+function AIKeyPoints({
+  points,
+  generating,
+}: {
+  points: string[];
+  generating: boolean;
+}) {
+  const hasPoints = points && points.length > 0;
+  if (!hasPoints && !generating) return null;
   return (
     <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-blue-600" />
         <h3 className="text-sm font-semibold text-gray-900">AI 解释要点</h3>
+        {generating && (
+          <span className="text-xs text-gray-500 ml-auto inline-flex items-center gap-1.5">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            生成中…
+          </span>
+        )}
       </div>
-      <ul className="px-4 py-3 space-y-2">
-        {points.map((point, i) => (
-          <li key={i} className="flex gap-2 text-sm text-gray-700">
-            <span className="text-blue-500 shrink-0 mt-0.5">•</span>
-            {point}
-          </li>
-        ))}
-      </ul>
+      {hasPoints ? (
+        <ul className="px-4 py-3 space-y-2">
+          {points.map((point, i) => (
+            <li key={i} className="flex gap-2 text-sm text-gray-700">
+              <span className="text-blue-500 shrink-0 mt-0.5">•</span>
+              {point}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="px-4 py-6 text-sm text-gray-500">
+          AI 正在分析回测结果…
+        </div>
+      )}
     </div>
   );
 }
@@ -460,13 +518,58 @@ export default function ResultPage() {
   const params = useParams<{ id: string }>();
   const studyId = params.id;
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [generatingConclusion, setGeneratingConclusion] = useState(false);
+  const [conclusionError, setConclusionError] = useState<string | null>(null);
+  const conclusionTriedRef = useRef(false);
 
-  const { data, error, isLoading } = useSWR<{ study: ApiStudy }>(
+  const { data, error, isLoading, mutate } = useSWR<{ study: ApiStudy }>(
     studyId ? `/api/studies/${studyId}` : null,
     fetcher,
   );
   const study = data?.study;
   const result = study?.result ?? null;
+
+  const generateConclusion = async () => {
+    if (!studyId) return;
+    setGeneratingConclusion(true);
+    setConclusionError(null);
+    try {
+      const res = await fetch(`/api/studies/${studyId}/result/conclusion`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        let msg = `生成失败 (HTTP ${res.status})`;
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body.error) msg = body.error;
+        } catch {
+          // non-JSON — keep default.
+        }
+        throw new Error(msg);
+      }
+      await mutate();
+    } catch (err) {
+      setConclusionError(err instanceof Error ? err.message : "AI 结论生成失败");
+    } finally {
+      setGeneratingConclusion(false);
+    }
+  };
+
+  // Auto-fire conclusion generation once for completed studies whose result
+  // has empty aiExplanation (e.g. legacy mock seed). Guarded by a ref so SWR
+  // re-renders or StrictMode double-invocation don't double-fire.
+  useEffect(() => {
+    if (!study || !result) return;
+    if (study.status !== "COMPLETED") return;
+    if (Array.isArray(result.aiExplanation) && result.aiExplanation.length > 0) {
+      return;
+    }
+    if (conclusionTriedRef.current) return;
+    if (generatingConclusion || conclusionError) return;
+    conclusionTriedRef.current = true;
+    void generateConclusion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [study, result]);
 
   if (isLoading) {
     return (
@@ -592,7 +695,15 @@ export default function ResultPage() {
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="space-y-5">
-              <AIConclusionCard result={result} />
+              <AIConclusionCard
+                result={result}
+                generating={generatingConclusion}
+                generationError={conclusionError}
+                onRetry={() => {
+                  conclusionTriedRef.current = true;
+                  void generateConclusion();
+                }}
+              />
               <MetricsTable result={result} />
             </div>
             <div className="space-y-5">
@@ -607,7 +718,10 @@ export default function ResultPage() {
               </ChartCard>
             </div>
           </div>
-          <AIKeyPoints points={result.aiExplanation ?? []} />
+          <AIKeyPoints
+            points={result.aiExplanation ?? []}
+            generating={generatingConclusion}
+          />
 
           {/* Next experiments */}
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">

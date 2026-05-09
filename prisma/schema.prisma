@@ -131,3 +131,15 @@ model StudyResult {
   aiExplanation     Json
   createdAt         DateTime @default(now())
 }
+
+// Per-user per-day AI call counters for cheap rate limiting. We don't need a
+// real bucket; daily reset is sufficient for the demo budget.
+model AiUsageDay {
+  userId          String
+  date            DateTime // truncated to YYYY-MM-DD UTC
+  planCalls       Int      @default(0)
+  conclusionCalls Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@id([userId, date])
+}

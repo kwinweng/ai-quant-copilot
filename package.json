@@ -13,6 +13,7 @@
     "seed": "node --no-warnings --import tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.1",
     "@auth/prisma-adapter": "^2.11.2",
     "@prisma/client": "^6.19.3",
     "@radix-ui/react-progress": "^1.1.8",

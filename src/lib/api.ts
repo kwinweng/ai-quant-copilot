@@ -23,3 +23,10 @@ export function notFound(message = "Not found") {
 export function serverError(message = "Internal server error") {
   return NextResponse.json({ error: message }, { status: 500 });
 }
+
+export function tooManyRequests(
+  message = "Rate limited",
+  details?: unknown,
+) {
+  return NextResponse.json({ error: message, details }, { status: 429 });
+}
