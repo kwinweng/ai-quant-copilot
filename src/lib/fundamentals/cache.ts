@@ -151,6 +151,107 @@ export async function getMergedSnapshot(
   return mergeFundamentals(yahooSnap, secSnap);
 }
 
+// =====================================================================
+// Phase 4+ PIT support: SEC historical snapshots
+// =====================================================================
+// One row per (ticker, fiscalDate) for SEC. Refresh policy:
+//   • If we have *any* SEC row for the ticker fresher than CACHE_TTL_HOURS,
+//     reuse the lot — the SEC list rarely changes outside of new filings,
+//     and a daily refresh window catches new 10-Ks promptly enough.
+//   • Otherwise fetch full history via SecEdgarProvider.fetchAll() and upsert
+//     every row.
+//
+// SEC's full historical list for a single ticker is small (<500 rows), so a
+// rebuild is cheap.
+
+async function refreshSecHistory(ticker: string): Promise<FundamentalSnapshot[]> {
+  const fresh = await sec.fetchAll(ticker);
+  if (fresh.length === 0) return fresh;
+  // Persist all rows. We don't bulk insert because Prisma's createMany skips
+  // upsert semantics; iterate is fine for ~30 rows per ticker.
+  for (const snap of fresh) {
+    try {
+      await writeCached(snap);
+    } catch (err) {
+      console.warn(
+        `[fundamentals/cache] persist sec history ${ticker} @${snap.fiscalDate.toISOString()} failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return fresh;
+}
+
+/**
+ * Get the full SEC filing history for a single ticker, refreshing the cache
+ * when the latest stored row is older than CACHE_TTL_HOURS. Sorted oldest-
+ * first.
+ */
+export async function getSecHistory(
+  ticker: string,
+): Promise<FundamentalSnapshot[]> {
+  const rows = await prisma.fundamentalSnapshot.findMany({
+    where: { ticker, source: "sec" },
+    orderBy: { fiscalDate: "asc" },
+  });
+  const newest = rows[rows.length - 1];
+  if (newest && isFresh(newest.asOf)) {
+    return rows.map(rowToSnapshot);
+  }
+  // Stale or empty → refresh.
+  const fresh = await refreshSecHistory(ticker);
+  if (fresh.length > 0) return fresh;
+  // If refresh failed (network) but we have stale rows, return them — better
+  // than nothing. The data quality panel will surface staleness via asOf.
+  return rows.map(rowToSnapshot);
+}
+
+/**
+ * Batch helper for the runner — returns ticker → SEC history.
+ */
+export async function getSecHistoryForUniverse(
+  tickers: readonly string[],
+  concurrency = 4,
+  onTickerDone?: (info: {
+    ticker: string;
+    completed: number;
+    total: number;
+    snapshotCount: number;
+  }) => void,
+): Promise<Record<string, FundamentalSnapshot[]>> {
+  const out: Record<string, FundamentalSnapshot[]> = {};
+  const queue = [...tickers];
+  let completed = 0;
+  const total = tickers.length;
+  async function worker() {
+    while (queue.length > 0) {
+      const t = queue.shift();
+      if (!t) return;
+      let history: FundamentalSnapshot[] = [];
+      try {
+        history = await getSecHistory(t);
+        if (history.length > 0) out[t] = history;
+      } catch (err) {
+        console.warn(
+          `[fundamentals/cache] getSecHistory ${t} failed:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+      completed++;
+      onTickerDone?.({
+        ticker: t,
+        completed,
+        total,
+        snapshotCount: history.length,
+      });
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, total) }, () => worker()),
+  );
+  return out;
+}
+
 /**
  * Batch fetch with bounded concurrency. Returns ticker → snapshot map; tickers
  * with no data simply omit from the map (downstream factor code treats this

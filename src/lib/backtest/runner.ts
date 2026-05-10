@@ -13,7 +13,10 @@ import {
   computeFactorDiagnostics,
   computeResultMetrics,
 } from "./metrics";
-import { getMergedSnapshotsForUniverse } from "@/lib/fundamentals/cache";
+import {
+  getMergedSnapshotsForUniverse,
+  getSecHistoryForUniverse,
+} from "@/lib/fundamentals/cache";
 import type { FundamentalSnapshot } from "@/lib/fundamentals/types";
 import {
   computeCoverage,
@@ -67,119 +70,185 @@ export function stepsForFactorMix(
   return mix === "multifactor" ? STEPS_MULTIFACTOR : STEPS_MOMENTUM;
 }
 
-// Phase 4: build a multi-factor FactorScores by *combining* (a) the month-
-// varying 12-1 momentum series we already compute and (b) a constant Value+
-// Quality tilt from today's Yahoo+SEC fundamentals snapshot. Result has the
-// same shape as compute121Momentum so the engine can swap it in unchanged.
+// Phase 4+ PIT: build a multi-factor FactorScores combining
+//   (a) the month-varying 12-1 momentum series we already compute,
+//   (b) a *time-varying* SEC Quality+Growth tilt — at each rebalance month M,
+//       we use the latest SEC filing whose `reportedAt < M − reportingLag`,
+//   (c) a *static* Yahoo Value tilt (PE/PB/PS/EV-EBITDA from current snapshot,
+//       since Yahoo doesn't ship history).
 //
-// Caveat (disclosed in dataQuality): Value/Quality are point-in-NOW, not
-// point-in-time historical, so this strategy has look-ahead on fundamentals.
-// The Phase 4 spec explicitly accepts this trade-off and surfaces it in the
-// data-quality panel.
+// Look-ahead bias: SEC fields are now PIT-correct (no future filings leak in).
+// Yahoo Value fields remain restated point-in-NOW — disclosed in dataQuality.
+//
+// Reporting lag default = 90 days, capturing typical 10-K filing delay.
+const REPORTING_LAG_DAYS = 90;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function monthKeyToCutoff(month: MonthKey, lagDays: number): Date {
+  // We treat the strategy as deciding at the end of the prior month for that
+  // month's portfolio (the engine's "decision month"). So as-of date is the
+  // last day of the prior month, minus reporting lag.
+  const [y, m] = month.split("-").map(Number);
+  // Last day of (y, m-1) → first day of (y, m) - 1ms
+  const monthStart = new Date(Date.UTC(y, m - 1, 1));
+  const decisionEnd = new Date(monthStart.getTime() - 1);
+  return new Date(decisionEnd.getTime() - lagDays * MS_PER_DAY);
+}
+
+function pickSnapshotAsOf(
+  history: FundamentalSnapshot[] | undefined,
+  cutoff: Date,
+): FundamentalSnapshot | undefined {
+  if (!history || history.length === 0) return undefined;
+  // History is sorted oldest-first by fiscalDate; we filter by reportedAt
+  // (the SEC filing date) to enforce PIT.
+  let pick: FundamentalSnapshot | undefined;
+  for (const snap of history) {
+    const filed = snap.reportedAt;
+    if (!filed) continue;
+    if (filed.getTime() <= cutoff.getTime()) {
+      // Keep the *latest* qualifying filing — equivalent to the most recent
+      // filing visible at cutoff time.
+      if (
+        !pick ||
+        (pick.reportedAt &&
+          filed.getTime() > pick.reportedAt.getTime())
+      ) {
+        pick = snap;
+      }
+    }
+  }
+  return pick;
+}
+
+function crossSectionalZ(
+  values: Map<string, number>,
+  lowerIsBetter: boolean,
+): Map<string, number> {
+  if (values.size < 2) return new Map();
+  const arr = Array.from(values.values());
+  const mean = arr.reduce((s, x) => s + x, 0) / arr.length;
+  const std = Math.sqrt(
+    arr.reduce((s, x) => s + (x - mean) ** 2, 0) / arr.length,
+  );
+  if (std === 0) return new Map();
+  const out = new Map<string, number>();
+  for (const [t, v] of values) {
+    const z = (v - mean) / std;
+    out.set(t, lowerIsBetter ? -z : z);
+  }
+  return out;
+}
+
 function buildMultiFactorScores(
   momentumScores: FactorScores,
-  fundamentals: Record<string, FundamentalSnapshot>,
+  yahooSnapshots: Record<string, FundamentalSnapshot>,
+  secHistory: Record<string, FundamentalSnapshot[]>,
 ): FactorScores {
   const tickers = Object.keys(momentumScores);
   if (tickers.length === 0) return {};
 
-  // Cross-sectional z-score helpers — operate on a single static snapshot.
-  const fieldZ = (field: keyof FundamentalSnapshot, lowerIsBetter: boolean) => {
-    const vals: number[] = [];
-    const present = new Map<string, number>();
+  // ----- (c) Static Yahoo Value tilt — same logic as before. -----
+  const collectYahoo = (
+    field: keyof FundamentalSnapshot,
+  ): Map<string, number> => {
+    const m = new Map<string, number>();
     for (const t of tickers) {
-      const v = fundamentals[t]?.[field];
-      if (typeof v === "number" && Number.isFinite(v)) {
-        vals.push(v);
-        present.set(t, v);
-      }
+      const v = yahooSnapshots[t]?.[field];
+      if (typeof v === "number" && Number.isFinite(v)) m.set(t, v);
     }
-    if (vals.length < 2) return new Map<string, number>();
-    const mean = vals.reduce((s, x) => s + x, 0) / vals.length;
-    const std = Math.sqrt(
-      vals.reduce((s, x) => s + (x - mean) ** 2, 0) / vals.length,
-    );
-    if (std === 0) return new Map<string, number>();
-    const out = new Map<string, number>();
-    for (const [t, v] of present) {
-      const z = (v - mean) / std;
-      out.set(t, lowerIsBetter ? -z : z);
-    }
-    return out;
+    return m;
   };
-
-  // Lower-is-better: PE / PB / PS / EV-EBITDA / debt-to-equity.
-  const peZ = fieldZ("pe", true);
-  const pbZ = fieldZ("pb", true);
-  const psZ = fieldZ("ps", true);
-  const evZ = fieldZ("evEbitda", true);
-  const roeZ = fieldZ("roe", false);
-  const roicZ = fieldZ("roic", false);
-  const gmZ = fieldZ("grossMargin", false);
-  const deZ = fieldZ("debtToEquity", true);
-
-  // Constant per-ticker value/quality tilt (does not vary across months).
-  const valueQualityZ = new Map<string, number>();
+  const peZ = crossSectionalZ(collectYahoo("pe"), true);
+  const pbZ = crossSectionalZ(collectYahoo("pb"), true);
+  const psZ = crossSectionalZ(collectYahoo("ps"), true);
+  const evZ = crossSectionalZ(collectYahoo("evEbitda"), true);
+  const valueZByTicker = new Map<string, number>();
   for (const t of tickers) {
-    const components: number[] = [];
+    const parts: number[] = [];
     for (const m of [peZ, pbZ, psZ, evZ]) {
       const v = m.get(t);
-      if (v !== undefined) components.push(v);
+      if (v !== undefined) parts.push(v);
     }
-    for (const m of [roeZ, roicZ, gmZ, deZ]) {
-      const v = m.get(t);
-      if (v !== undefined) components.push(v);
-    }
-    if (components.length > 0) {
-      valueQualityZ.set(
-        t,
-        components.reduce((s, x) => s + x, 0) / components.length,
-      );
+    if (parts.length > 0) {
+      valueZByTicker.set(t, parts.reduce((s, x) => s + x, 0) / parts.length);
     }
   }
 
-  // For each (ticker, month) pair, composite = average of (per-month momentum
-  // z-scored cross-sectionally at that month) + (static value/quality z).
-  // First, pre-compute cross-sectional momentum z-scores per month so we can
-  // mix on the same scale.
-  // Collect all months that appear in any ticker's momentum series.
+  // ----- Month axis -----
   const allMonths = new Set<MonthKey>();
   for (const t of tickers) {
     for (const k of momentumScores[t]?.keys() ?? []) allMonths.add(k);
   }
+  const sortedMonths = Array.from(allMonths).sort();
+
+  // ----- (a) Per-month cross-sectional momentum z-scores. -----
   const monthMomZ = new Map<MonthKey, Map<string, number>>();
-  for (const month of allMonths) {
-    const vals: number[] = [];
-    const present = new Map<string, number>();
+  for (const month of sortedMonths) {
+    const vals = new Map<string, number>();
     for (const t of tickers) {
       const v = momentumScores[t]?.get(month);
-      if (typeof v === "number" && Number.isFinite(v)) {
-        vals.push(v);
-        present.set(t, v);
-      }
+      if (typeof v === "number" && Number.isFinite(v)) vals.set(t, v);
     }
-    if (vals.length < 2) continue;
-    const mean = vals.reduce((s, x) => s + x, 0) / vals.length;
-    const std = Math.sqrt(
-      vals.reduce((s, x) => s + (x - mean) ** 2, 0) / vals.length,
-    );
-    if (std === 0) continue;
-    const out = new Map<string, number>();
-    for (const [t, v] of present) out.set(t, (v - mean) / std);
-    monthMomZ.set(month, out);
+    monthMomZ.set(month, crossSectionalZ(vals, false));
   }
 
+  // ----- (b) Per-month PIT Quality+Growth z-scores using SEC history. -----
+  // For each month, build {ticker → asOfSnapshot} then z-score each field
+  // cross-sectionally and average into a Quality_t composite.
+  const monthQualityZ = new Map<MonthKey, Map<string, number>>();
+  for (const month of sortedMonths) {
+    const cutoff = monthKeyToCutoff(month, REPORTING_LAG_DAYS);
+    const asOf = new Map<string, FundamentalSnapshot>();
+    for (const t of tickers) {
+      const pick = pickSnapshotAsOf(secHistory[t], cutoff);
+      if (pick) asOf.set(t, pick);
+    }
+    if (asOf.size < 2) {
+      monthQualityZ.set(month, new Map());
+      continue;
+    }
+    // Cross-sectional z per Quality field at this month.
+    const collect = (field: keyof FundamentalSnapshot) => {
+      const m = new Map<string, number>();
+      for (const [t, snap] of asOf) {
+        const v = snap[field];
+        if (typeof v === "number" && Number.isFinite(v)) m.set(t, v);
+      }
+      return m;
+    };
+    const roeZt = crossSectionalZ(collect("roe"), false);
+    const roicZt = crossSectionalZ(collect("roic"), false);
+    const gmZt = crossSectionalZ(collect("grossMargin"), false);
+    const deZt = crossSectionalZ(collect("debtToEquity"), true);
+    const out = new Map<string, number>();
+    for (const t of tickers) {
+      const parts: number[] = [];
+      for (const m of [roeZt, roicZt, gmZt, deZt]) {
+        const v = m.get(t);
+        if (v !== undefined) parts.push(v);
+      }
+      if (parts.length > 0) {
+        out.set(t, parts.reduce((s, x) => s + x, 0) / parts.length);
+      }
+    }
+    monthQualityZ.set(month, out);
+  }
+
+  // ----- Composite: equal-weight mean of available components per (ticker, month) -----
   const composite: FactorScores = {};
   for (const t of tickers) {
     const m = new Map<MonthKey, number>();
-    for (const month of allMonths) {
+    const valueZ = valueZByTicker.get(t);
+    for (const month of sortedMonths) {
       const momZ = monthMomZ.get(month)?.get(t);
-      const vqZ = valueQualityZ.get(t);
-      const components: number[] = [];
-      if (momZ !== undefined) components.push(momZ);
-      if (vqZ !== undefined) components.push(vqZ);
-      if (components.length === 0) continue;
-      m.set(month, components.reduce((s, x) => s + x, 0) / components.length);
+      const qualZ = monthQualityZ.get(month)?.get(t);
+      const parts: number[] = [];
+      if (momZ !== undefined) parts.push(momZ);
+      if (valueZ !== undefined) parts.push(valueZ);
+      if (qualZ !== undefined) parts.push(qualZ);
+      if (parts.length === 0) continue;
+      m.set(month, parts.reduce((s, x) => s + x, 0) / parts.length);
     }
     composite[t] = m;
   }
@@ -614,37 +683,60 @@ export async function runBacktest(studyId: string): Promise<void> {
     );
 
     // -------- Step 3.5 (multifactor only): fetch fundamentals --------
+    // Phase 4+ PIT: parallel-fetch (a) Yahoo current snapshot for static
+    // Value tilt and (b) SEC full filing history for time-varying Quality.
     let fundamentals: Record<string, FundamentalSnapshot> = {};
+    let secHistory: Record<string, FundamentalSnapshot[]> = {};
     let factorCoverage: FactorCoverageReport | undefined;
     if (isMultiFactor) {
       await assertNotCancelled(studyId);
       const tFund = Date.now();
       await setStep(
         studyId,
-        3, // multifactor's step 3 = fundamentals
+        3,
         "running",
-        `开始拉取基本面数据（Yahoo + SEC EDGAR，${UNIVERSE.length} 个标的）`,
+        `开始拉取基本面数据（Yahoo 当前快照 + SEC EDGAR 历史 filings，${UNIVERSE.length} 个标的）`,
       );
-      fundamentals = await getMergedSnapshotsForUniverse(
-        UNIVERSE,
-        4,
-        ({ ticker, completed, total, hasData }) => {
-          if (completed % 5 === 0 || completed === total) {
-            appendLog(
-              studyId,
-              `基本面 ${completed}/${total}（${ticker}${hasData ? "" : " 无数据"}）`,
-            ).catch(() => {});
-          }
-        },
-      );
+      const [merged, history] = await Promise.all([
+        getMergedSnapshotsForUniverse(
+          UNIVERSE,
+          4,
+          ({ ticker, completed, total, hasData }) => {
+            if (completed % 5 === 0 || completed === total) {
+              appendLog(
+                studyId,
+                `Yahoo+SEC 合并 ${completed}/${total}（${ticker}${hasData ? "" : " 无数据"}）`,
+              ).catch(() => {});
+            }
+          },
+        ),
+        getSecHistoryForUniverse(
+          UNIVERSE,
+          4,
+          ({ ticker, completed, total, snapshotCount }) => {
+            if (completed % 5 === 0 || completed === total) {
+              appendLog(
+                studyId,
+                `SEC 历史 ${completed}/${total}（${ticker} ${snapshotCount} 个 10-K 快照）`,
+              ).catch(() => {});
+            }
+          },
+        ),
+      ]);
+      fundamentals = merged;
+      secHistory = history;
       factorCoverage = computeCoverage(UNIVERSE, fundamentals);
       const covered = UNIVERSE.length - factorCoverage.missingTickers.length;
+      const totalHistRows = Object.values(secHistory).reduce(
+        (s, arr) => s + arr.length,
+        0,
+      );
       await setStep(
         studyId,
         3,
         "complete",
-        `基本面数据拉取完成（${covered}/${UNIVERSE.length} 有数据，价值覆盖 ${Math.round(factorCoverage.valueCoverage * 100)}%、质量覆盖 ${Math.round(factorCoverage.qualityCoverage * 100)}%）`,
-        undefined,
+        `基本面数据拉取完成（${covered}/${UNIVERSE.length} 当前快照有数据，SEC 历史共 ${totalHistRows} 条 filing）`,
+        `价值 ${Math.round(factorCoverage.valueCoverage * 100)}% · 质量 ${Math.round(factorCoverage.qualityCoverage * 100)}%`,
         Math.round((Date.now() - tFund) / 1000),
       );
     }
@@ -657,13 +749,13 @@ export async function runBacktest(studyId: string): Promise<void> {
       stepIdx(3),
       "running",
       isMultiFactor
-        ? "计算多因子合成得分（Value + Quality + 12-1 Momentum 等权 z-score）"
+        ? "计算多因子合成得分（Value 静态 + Quality PIT 90 天 lag + 12-1 Momentum，等权合成）"
         : "计算 12-1 动量因子",
     );
     const momentumScores = compute121Momentum(prices);
     let scores: FactorScores;
     if (isMultiFactor) {
-      scores = buildMultiFactorScores(momentumScores, fundamentals);
+      scores = buildMultiFactorScores(momentumScores, fundamentals, secHistory);
     } else {
       scores = momentumScores;
     }
@@ -870,7 +962,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         ? "Multi-factor (Value + Quality + 12-1 Momentum)"
         : "Price-only momentum",
       factorTypeNote: isMultiFactor
-        ? "Value/Quality 使用 Yahoo + SEC EDGAR 当前快照（点-in-now），并非历史 PIT 数据；回测假设这些基本面在整个窗口期保持不变，存在前视偏差。ROIC 为简化版 NetIncome/(Equity+TotalDebt) 代理，未做后税利息调整。EV/EBITDA 优先取 Yahoo 直接值，缺失时用 EV÷EBITDA 自算兜底。Momentum 是月度滚动 12-1。"
+        ? "混合 PIT：Quality 因子（ROE / ROIC / 毛利率 / 负债权益）来自 SEC EDGAR 全历史 10-K filings，每月 M 只用 reportedAt < M − 90 天 的最新一份，已消除前视偏差。Value 因子（PE / PB / PS / EV-EBITDA）来自 Yahoo 当前快照，无历史 API 支持，仍是 point-in-NOW、应用于整个窗口期，存在前视偏差。ROIC 为简化版 NetIncome/(Equity+TotalDebt) 代理。EV/EBITDA 优先 Yahoo 直接字段，缺失时用 EV÷EBITDA 自算兜底。Momentum 月度滚动 12-1。"
         : "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子",
       priceCoverage: {
         totalDataPoints: totalPoints,

@@ -308,4 +308,175 @@ export class SecEdgarProvider implements FundamentalsProvider {
       },
     };
   }
+
+  /**
+   * Phase 4+ PIT support: emit one snapshot per historical 10-K filing.
+   *
+   * For each fiscal-year-end (10-K end date), we pick the values from that
+   * specific filing (matched by `end` date), then derive ROE / ROIC / etc.
+   * The `reportedAt` field carries the SEC submission date, which the
+   * backtest engine uses to gate visibility (a strategy at month M can only
+   * see filings filed before M − reportingLag).
+   *
+   * Returns history sorted oldest-first.
+   */
+  async fetchAll(ticker: string): Promise<FundamentalSnapshot[]> {
+    const cik = await resolveCik(ticker);
+    if (!cik) return [];
+    const facts = await fetchCompanyFacts(cik);
+    if (!facts) return [];
+
+    const annualsOf = (
+      points: FactPoint[] | undefined,
+    ): Map<string, FactPoint> => {
+      const m = new Map<string, FactPoint>();
+      if (!points) return m;
+      for (const p of points) {
+        if (p.form !== "10-K" && p.form !== "10-K/A") continue;
+        // Within a fiscal year-end key, prefer the most recent filing — covers
+        // amendments (10-K/A) replacing the original.
+        const existing = m.get(p.end);
+        if (!existing || existing.filed.localeCompare(p.filed) < 0) {
+          m.set(p.end, p);
+        }
+      }
+      return m;
+    };
+
+    const revenues = annualsOf(
+      getConcept(
+        facts,
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "SalesRevenueNet",
+        "SalesRevenueServicesNet",
+      ),
+    );
+    const grossProfit = annualsOf(getConcept(facts, "GrossProfit"));
+    const netIncome = annualsOf(
+      getConcept(facts, "NetIncomeLoss", "ProfitLoss"),
+    );
+    const stockholdersEquity = annualsOf(
+      getConcept(
+        facts,
+        "StockholdersEquity",
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+      ),
+    );
+    const longTermDebt = annualsOf(
+      getConcept(facts, "LongTermDebt", "LongTermDebtNoncurrent"),
+    );
+    const shortTermDebt = annualsOf(
+      getConcept(
+        facts,
+        "ShortTermBorrowings",
+        "LongTermDebtCurrent",
+        "DebtCurrent",
+      ),
+    );
+    const epsAnnual = annualsOf(
+      getConcept(facts, "EarningsPerShareBasic", "EarningsPerShareDiluted"),
+    );
+
+    // Union of all fiscal-year-end dates we have any data for.
+    const fiscalEnds = new Set<string>();
+    for (const m of [
+      revenues,
+      grossProfit,
+      netIncome,
+      stockholdersEquity,
+      longTermDebt,
+      shortTermDebt,
+      epsAnnual,
+    ]) {
+      for (const k of m.keys()) fiscalEnds.add(k);
+    }
+    const sortedEnds = Array.from(fiscalEnds).sort();
+
+    const out: FundamentalSnapshot[] = [];
+    for (let i = 0; i < sortedEnds.length; i++) {
+      const fy = sortedEnds[i];
+      const rev = revenues.get(fy);
+      const gp = grossProfit.get(fy);
+      const ni = netIncome.get(fy);
+      const eq = stockholdersEquity.get(fy);
+      const ltd = longTermDebt.get(fy);
+      const std = shortTermDebt.get(fy);
+
+      // The reportedAt anchor: max(filed) across the inputs we used. If a
+      // strategy could only see one of these, the latest filing is the
+      // limiting factor.
+      const filedDates = [rev, gp, ni, eq, ltd, std]
+        .map((p) => p?.filed)
+        .filter((s): s is string => !!s);
+      if (filedDates.length === 0) continue;
+      const reportedAt = new Date(filedDates.sort().at(-1)!);
+      const fiscalDate = new Date(fy);
+
+      const grossMargin =
+        rev && gp && rev.val > 0
+          ? Math.round((gp.val / rev.val) * 1000) / 10
+          : undefined;
+      const roe =
+        ni && eq && eq.val > 0
+          ? Math.round((ni.val / eq.val) * 1000) / 10
+          : undefined;
+      const investedCapital =
+        (eq?.val ?? 0) + (ltd?.val ?? 0) + (std?.val ?? 0);
+      const roic =
+        ni && investedCapital > 0
+          ? Math.round((ni.val / investedCapital) * 1000) / 10
+          : undefined;
+      const debtToEquity =
+        eq && eq.val > 0
+          ? ((ltd?.val ?? 0) + (std?.val ?? 0)) / eq.val
+          : undefined;
+
+      // YoY growth — needs the prior fiscal-end, if we have it.
+      let revenueGrowth: number | undefined;
+      let epsGrowth: number | undefined;
+      if (i > 0) {
+        const prev = sortedEnds[i - 1];
+        const prevRev = revenues.get(prev);
+        if (rev && prevRev && prevRev.val > 0) {
+          revenueGrowth =
+            Math.round(((rev.val - prevRev.val) / prevRev.val) * 1000) / 10;
+        }
+        const eps = epsAnnual.get(fy);
+        const prevEps = epsAnnual.get(prev);
+        if (eps && prevEps && Math.abs(prevEps.val) > 0.01) {
+          epsGrowth =
+            Math.round(((eps.val - prevEps.val) / Math.abs(prevEps.val)) * 1000) / 10;
+        }
+      }
+
+      out.push({
+        ticker,
+        source: "sec",
+        fiscalDate,
+        reportedAt,
+        // SEC has no market-price-dependent ratios.
+        pe: undefined,
+        pb: undefined,
+        ps: undefined,
+        evEbitda: undefined,
+        roe,
+        roic,
+        grossMargin,
+        debtToEquity,
+        revenueGrowth,
+        epsGrowth,
+        raw: {
+          fiscalEnd: fy,
+          revenues: rev,
+          grossProfit: gp,
+          netIncome: ni,
+          stockholdersEquity: eq,
+          longTermDebt: ltd,
+          shortTermDebt: std,
+        },
+      });
+    }
+    return out;
+  }
 }
