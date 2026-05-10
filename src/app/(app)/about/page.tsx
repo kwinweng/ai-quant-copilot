@@ -40,6 +40,22 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Phase 6 · 股票池 30→60 + UniverseProvider 抽象",
+    date: "2026-05-11",
+    title: "样本数翻倍 + 8 板块覆盖 + 加入「淡出大市值」反幸存者样本",
+    summary:
+      "把硬编码股票池从 30 扩到 60，覆盖 8 个 GICS 板块；新增 UniverseProvider 接口为 Phase 6.5 时变成分股铺路。仍是静态 universe，但样本数 2× + 部分弱势标的（INTC/IBM/GE/F/KSS/X）部分缓解幸存者偏差。",
+    highlights: [
+      "30 → 60 标的：tech/financials/healthcare/consumer disc/staples/energy/industrials/comms 各占合理比例",
+      "新增 30 只 CIK 映射并加测试保证唯一性",
+      "src/lib/backtest/universeProvider.ts：UniverseProvider 接口 + 静态实现 + 时变 universe 占位（Phase 6.5）",
+      "DataQualityCard 文案更新：30 → 60，幸存者偏差仍诚实披露",
+      "+12 个测试（universe 12 个：列表完整性、CIK 唯一性、provider 接口、rebalance 解析）",
+      "Phase 6.5 待办：Wikipedia 历史 S&P 500 成分 + getUniverseAt(M) 时变接入",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
     version: "Phase 5 · Value 因子 PIT 化",
     date: "2026-05-10",
     title: "PE / PB / PS 历史值消除前视偏差，多因子从「混合 PIT」升级到「全 PIT」",

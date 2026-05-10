@@ -830,7 +830,7 @@ export async function runBacktest(studyId: string): Promise<void> {
       .map(([t]) => t);
     const dataQuality = {
       universeSize: UNIVERSE.length,
-      universeNote: "当前股票池为静态 30 只美股大市值列表（硬编码），不是历史完整 S&P 500 成分股",
+      universeNote: `当前股票池为静态 ${UNIVERSE.length} 只美股大市值列表（覆盖 8 个 GICS 板块），整个回测窗口期保持不变。仍存在幸存者偏差（每只标的今天仍在交易），Phase 6.5 计划接入历史指数成分股以消除`,
       survivorshipBias: true,
       survivorshipNote:
         "因为股票池在整个回测窗口里固定，已退市/被剔除指数的标的不在样本里，回测结果存在幸存者偏差",
