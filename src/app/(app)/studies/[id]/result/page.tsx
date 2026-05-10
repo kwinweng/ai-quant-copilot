@@ -249,13 +249,13 @@ function MetricsTable({ result }: { result: ApiResult }) {
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200">
-              <th className="py-2 text-xs text-gray-400 text-left font-medium">
+              <th className="py-2 text-xs text-gray-500 text-left font-medium">
                 指标
               </th>
               <th className="py-2 text-xs text-gray-700 text-right font-medium">
                 策略
               </th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium">
+              <th className="py-2 text-xs text-gray-500 text-right font-medium">
                 {/* benchmark label */}
                 基准
               </th>
@@ -510,22 +510,22 @@ function FactorDiagnostics({
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200">
-              <th className="py-2 text-xs text-gray-400 text-left font-medium">
+              <th className="py-2 text-xs text-gray-500 text-left font-medium">
                 因子
               </th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium">
+              <th className="py-2 text-xs text-gray-500 text-right font-medium">
                 IC
               </th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium">
+              <th className="py-2 text-xs text-gray-500 text-right font-medium">
                 IC IR
               </th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium hidden sm:table-cell">
+              <th className="py-2 text-xs text-gray-500 text-right font-medium hidden sm:table-cell">
                 Q1 收益
               </th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium hidden sm:table-cell">
+              <th className="py-2 text-xs text-gray-500 text-right font-medium hidden sm:table-cell">
                 Q5 收益
               </th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium">
+              <th className="py-2 text-xs text-gray-500 text-right font-medium">
                 价差
               </th>
             </tr>
@@ -757,10 +757,10 @@ function AnnualReturnsTable({
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200">
-              <th className="py-2 text-xs text-gray-400 text-left font-medium">年份</th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium">策略</th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium">基准</th>
-              <th className="py-2 text-xs text-gray-400 text-right font-medium">超额</th>
+              <th className="py-2 text-xs text-gray-500 text-left font-medium">年份</th>
+              <th className="py-2 text-xs text-gray-500 text-right font-medium">策略</th>
+              <th className="py-2 text-xs text-gray-500 text-right font-medium">基准</th>
+              <th className="py-2 text-xs text-gray-500 text-right font-medium">超额</th>
             </tr>
           </thead>
           <tbody>
@@ -840,10 +840,10 @@ function BestWorstMonthsCard({
           <table className="w-full">
             <thead>
               <tr>
-                <th className="py-1 text-xs text-gray-400 text-left font-medium">月份</th>
-                <th className="py-1 text-xs text-gray-400 text-right font-medium">策略</th>
-                <th className="py-1 text-xs text-gray-400 text-right font-medium">基准</th>
-                <th className="py-1 text-xs text-gray-400 text-right font-medium">超额</th>
+                <th className="py-1 text-xs text-gray-500 text-left font-medium">月份</th>
+                <th className="py-1 text-xs text-gray-500 text-right font-medium">策略</th>
+                <th className="py-1 text-xs text-gray-500 text-right font-medium">基准</th>
+                <th className="py-1 text-xs text-gray-500 text-right font-medium">超额</th>
               </tr>
             </thead>
             <tbody>{best.map(renderRow)}</tbody>
@@ -856,10 +856,10 @@ function BestWorstMonthsCard({
           <table className="w-full">
             <thead>
               <tr>
-                <th className="py-1 text-xs text-gray-400 text-left font-medium">月份</th>
-                <th className="py-1 text-xs text-gray-400 text-right font-medium">策略</th>
-                <th className="py-1 text-xs text-gray-400 text-right font-medium">基准</th>
-                <th className="py-1 text-xs text-gray-400 text-right font-medium">超额</th>
+                <th className="py-1 text-xs text-gray-500 text-left font-medium">月份</th>
+                <th className="py-1 text-xs text-gray-500 text-right font-medium">策略</th>
+                <th className="py-1 text-xs text-gray-500 text-right font-medium">基准</th>
+                <th className="py-1 text-xs text-gray-500 text-right font-medium">超额</th>
               </tr>
             </thead>
             <tbody>{worst.map(renderRow)}</tbody>
@@ -911,10 +911,10 @@ function RebalanceHistoryCard({
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50/50">
-              <th className="py-2 px-4 text-xs text-gray-400 text-left font-medium">日期</th>
-              <th className="py-2 px-4 text-xs text-gray-400 text-left font-medium">持仓（标的）</th>
-              <th className="py-2 px-4 text-xs text-gray-400 text-right font-medium">单边换手</th>
-              <th className="py-2 px-4 text-xs text-gray-400 text-right font-medium">交易成本</th>
+              <th className="py-2 px-4 text-xs text-gray-500 text-left font-medium">日期</th>
+              <th className="py-2 px-4 text-xs text-gray-500 text-left font-medium">持仓（标的）</th>
+              <th className="py-2 px-4 text-xs text-gray-500 text-right font-medium">单边换手</th>
+              <th className="py-2 px-4 text-xs text-gray-500 text-right font-medium">交易成本</th>
             </tr>
           </thead>
           <tbody>
@@ -969,12 +969,12 @@ function SensitivityTable({
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50/60">
-              <th className="py-2 px-3 text-xs text-gray-400 text-left font-medium">参数</th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">CAGR</th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">Sharpe</th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">Max DD</th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">Alpha</th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">IR</th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-left font-medium">参数</th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">CAGR</th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">Sharpe</th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">Max DD</th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">Alpha</th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">IR</th>
             </tr>
           </thead>
           <tbody>
@@ -1170,19 +1170,19 @@ function FactorBreakdownCard({ data }: { data?: FactorBreakdown | null }) {
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50/60">
-              <th className="py-2 px-3 text-xs text-gray-400 text-left font-medium">
+              <th className="py-2 px-3 text-xs text-gray-500 text-left font-medium">
                 标的
               </th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">
                 Value z
               </th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">
                 Quality z
               </th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">
                 Momentum z
               </th>
-              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">
                 合成
               </th>
             </tr>

@@ -480,15 +480,12 @@ export class SecEdgarProvider implements FundamentalsProvider {
         debtToEquity,
         revenueGrowth,
         epsGrowth,
-        raw: {
-          fiscalEnd: fy,
-          revenues: rev,
-          grossProfit: gp,
-          netIncome: ni,
-          stockholdersEquity: eq,
-          longTermDebt: ltd,
-          shortTermDebt: std,
-        },
+        // Sprint #6 M1: PIT history can have 10-20 rows per ticker × 30
+        // tickers = 300+ rows. Carrying the per-row raw payload bloats the
+        // JSONB column needlessly — derived ratios above are what the
+        // backtest actually consumes. Keep just the fiscal-end key for
+        // debug pinpointing.
+        raw: { fiscalEnd: fy },
       });
     }
     return out;

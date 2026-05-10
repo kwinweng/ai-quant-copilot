@@ -349,7 +349,7 @@ function CompareInner() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50/60">
-                    <th className="py-2 px-3 text-xs text-gray-400 text-left font-medium">
+                    <th className="py-2 px-3 text-xs text-gray-500 text-left font-medium">
                       指标
                     </th>
                     <th className="py-2 px-3 text-xs text-gray-700 text-right font-medium">
@@ -407,7 +407,7 @@ function CompareInner() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50/60">
-                    <th className="py-2 px-3 text-xs text-gray-400 text-left font-medium">
+                    <th className="py-2 px-3 text-xs text-gray-500 text-left font-medium">
                       字段
                     </th>
                     <th className="py-2 px-3 text-xs text-gray-700 text-right font-medium">

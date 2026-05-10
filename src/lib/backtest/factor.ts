@@ -47,6 +47,11 @@ export function compute121Momentum(prices: MonthlyPrices): FactorScores {
 // Helper: rank tickers by factor at a given month, returning the sorted list
 // (highest factor first). Tickers without a factor value at month M are
 // excluded.
+//
+// Sprint #6 M2: tied scores get a deterministic tiebreaker (ticker ASC) so
+// reruns of the same backtest pick the same holdings. V8's Array.sort is
+// stable as of recent runtimes, but we don't want to rely on equal-score
+// inputs preserving insertion order across object-key iteration.
 export function rankByFactor(
   scores: FactorScores,
   month: MonthKey,
@@ -57,6 +62,8 @@ export function rankByFactor(
     if (v == null || !Number.isFinite(v)) continue;
     ranked.push({ ticker, score: v });
   }
-  ranked.sort((a, b) => b.score - a.score);
+  ranked.sort(
+    (a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker),
+  );
   return ranked;
 }

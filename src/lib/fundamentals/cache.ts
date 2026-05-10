@@ -242,10 +242,17 @@ export async function getSecHistory(
 
 /**
  * Batch helper for the runner — returns ticker → SEC history.
+ *
+ * Sprint #6 M1: default concurrency lowered from 4 → 2 for the SEC path.
+ * companyfacts JSON is 1-5 MB per ticker (AAPL ~3 MB) and we don't release
+ * the parsed object until the fetchAll() function returns. Concurrency 4
+ * meant ~12-20 MB simultaneous JSON in memory; concurrency 2 halves that
+ * peak with negligible wall-clock impact (SEC's own 10 req/s soft limit
+ * dominates, not our parallelism).
  */
 export async function getSecHistoryForUniverse(
   tickers: readonly string[],
-  concurrency = 4,
+  concurrency = 2,
   onTickerDone?: (info: {
     ticker: string;
     completed: number;

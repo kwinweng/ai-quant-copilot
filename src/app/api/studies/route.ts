@@ -43,7 +43,44 @@ export async function GET() {
         },
       },
     });
-    return NextResponse.json({ studies });
+
+    // Sprint #6 M5: dashboard polls this list every 5s. The metrics JSON has
+    // 10+ leaf fields × {strategy, spy} = ~700 bytes per row, but the
+    // dashboard cards only compare CAGR / Sharpe / Max DD. Strip the rest
+    // server-side so a 50-study workspace polls ~25 KB instead of ~50 KB.
+    // Conclusion stays full-text since it's already line-clamped client-side
+    // and renaming/truncating it on the server breaks compare/result pages
+    // that share the same fetcher.
+    type SlimMetrics = {
+      strategy: { cagr: number; sharpe: number; maxDrawdown: number };
+      spy: { cagr: number; sharpe: number; maxDrawdown: number };
+    } | null;
+    const slimMetrics = (raw: unknown): SlimMetrics => {
+      if (!raw || typeof raw !== "object") return null;
+      const m = raw as Record<string, unknown>;
+      const pick = (side: unknown) => {
+        if (!side || typeof side !== "object") return null;
+        const s = side as Record<string, unknown>;
+        const num = (v: unknown): number =>
+          typeof v === "number" && Number.isFinite(v) ? v : 0;
+        return {
+          cagr: num(s.cagr),
+          sharpe: num(s.sharpe),
+          maxDrawdown: num(s.maxDrawdown),
+        };
+      };
+      const strategy = pick(m.strategy);
+      const spy = pick(m.spy);
+      if (!strategy || !spy) return null;
+      return { strategy, spy };
+    };
+    const slimStudies = studies.map((s) => ({
+      ...s,
+      result: s.result
+        ? { ...s.result, metrics: slimMetrics(s.result.metrics) }
+        : null,
+    }));
+    return NextResponse.json({ studies: slimStudies });
   } catch (err) {
     console.error("GET /api/studies failed", err);
     return serverError();

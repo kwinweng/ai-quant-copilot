@@ -57,13 +57,24 @@ async function fetchOne(
     interval: "1mo",
   });
   const map = new Map<MonthKey, number>();
+  // Sprint #6 M3: drop any bar whose date is strictly after period2 (the
+  // exclusive upper bound). Yahoo's monthly endpoint usually returns one
+  // mid-month "in-progress" bar for the current calendar month when our
+  // window includes it, plus the prior month's end-of-month bar. The
+  // in-progress one would land in the same MonthKey as the EOM and
+  // overwrite it ("last write wins") — fine as a current-snapshot price
+  // but wrong for backtest purposes where we sample at month-end. The
+  // explicit cutoff prevents that overwrite.
+  const cutoffMs = period2.getTime();
   for (const q of result.quotes) {
+    if (q.date == null) continue;
+    const ts = new Date(q.date).getTime();
+    if (ts > cutoffMs) continue;
     const price = q.adjclose ?? q.close;
-    if (q.date == null || price == null || !Number.isFinite(price)) continue;
+    if (price == null || !Number.isFinite(price)) continue;
     const key = monthKey(new Date(q.date));
-    // chart() can return both an end-of-month bar and a partial in-progress
-    // bar for the current month — last write wins, which matches how we'd
-    // sample at month-end.
+    // For multiple bars within the same month (already filtered above),
+    // last write wins by design — usually identical EOM values anyway.
     map.set(key, price);
   }
   return map;

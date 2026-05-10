@@ -70,12 +70,15 @@ const STATUS_LABEL: Record<StudyStatus, string> = {
   CANCELLED: "已取消",
 };
 
-const STATUS_BADGE: Record<StudyStatus, "success" | "running" | "muted" | "warning"> = {
+// Sprint #6 U17: FAILED uses "danger" (red) to match running page; previous
+// "warning" (yellow) made dashboard and running page disagree on the same
+// status's severity.
+const STATUS_BADGE: Record<StudyStatus, "success" | "running" | "muted" | "danger"> = {
   DRAFT: "muted",
   PLANNED: "muted",
   RUNNING: "running",
   COMPLETED: "success",
-  FAILED: "warning",
+  FAILED: "danger",
   CANCELLED: "muted",
 };
 
@@ -187,7 +190,7 @@ function IconButton({
         e.stopPropagation();
         onClick();
       }}
-      className={`inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 disabled:opacity-50 ${className}`}
+      className={`inline-flex h-6 w-6 items-center justify-center rounded text-gray-500 hover:bg-gray-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${className}`}
     >
       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : children}
     </button>

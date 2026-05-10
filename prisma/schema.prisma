@@ -106,6 +106,9 @@ model Study {
   @@index([userId, createdAt])
   @@index([userId, archived])
   @@index([userId, favorited])
+  // Sprint #6 M4: GIN index on tags so dashboard tag filter doesn't seq-scan
+  // once a workspace grows past a few hundred studies.
+  @@index([tags], type: Gin)
 }
 
 model StudyPlan {

@@ -40,6 +40,24 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Sprint #6 · 评审 backlog 收尾",
+    date: "2026-05-10",
+    title: "MEDIUM 5 项 + UI 微调 3 项全部清掉",
+    summary:
+      "把代码评审里的 MEDIUM 和 UI 微调一次刷干净。性能、健壮性、可访问性三个维度的兜底都到位。",
+    highlights: [
+      "M2 — rankByFactor 加 ticker 字典序 tiebreaker，相同 score 的标的选择确定可重复",
+      "M3 — prices.ts 跳过 endDate 之后的 in-progress bar，回测最末月不再混入月中价",
+      "M1 — SEC 历史 PIT 行不再存 raw payload；getSecHistoryForUniverse 默认并发 4→2，内存峰值减半",
+      "M5 — GET /api/studies 服务端 slim metrics，仅保留 dashboard 用的 CAGR/Sharpe/Max DD，轮询载荷减半",
+      "M4 — Study.tags 加 GIN 索引，工作区扩到几百个 study 时标签筛选不再 seq-scan",
+      "U17 — Failed badge 从 warning 黄改 danger 红，与 running 页一致",
+      "U19 — 表头 text-gray-400 全替换为 gray-500，达 WCAG AA 4.5:1 对比度",
+      "U20 — IconButton 加 focus-visible 蓝色焦点环，键盘可见",
+    ],
+    badge: { label: "fix", tone: "fix" },
+  },
+  {
     version: "Sprint #5 · 剩余健壮性兜底",
     date: "2026-05-10",
     title: "Yahoo D/E 单位、SEC 债务概念、SSE done 帧、AI quota retry 计费",
