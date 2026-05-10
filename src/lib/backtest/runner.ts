@@ -26,6 +26,10 @@ import {
 } from "@/lib/factors/multifactor";
 import { buildMultiFactorScores } from "@/lib/factors/pitMultifactor";
 import { buildRobustnessReport } from "./robustness";
+import {
+  ATTRIBUTION_BENCHMARKS,
+  buildBenchmarkAttribution,
+} from "./benchmarkAttribution";
 
 // Canonical step list for momentum-only studies. Multi-factor studies extend
 // this with an extra "拉取基本面数据" step — see stepsForFactorMix below.
@@ -779,6 +783,39 @@ export async function runBacktest(studyId: string): Promise<void> {
       console.warn("[backtest] robustness report failed:", robErr);
     }
 
+    // Phase 9: multi-benchmark OLS attribution — fetch SPY/QQQ/IWM/MTUM/IUSV
+    // monthly prices (SPY may already be loaded as the primary benchmark)
+    // and run a single-variable regression for each. Reveals how much of
+    // the strategy's "alpha" is actually exposure to a known factor ETF.
+    let benchmarkAttribution:
+      | ReturnType<typeof buildBenchmarkAttribution>
+      | null = null;
+    try {
+      const attrTickers = ATTRIBUTION_BENCHMARKS.map((b) => b.ticker).filter(
+        (t) => t !== benchTicker, // skip the one we already loaded as path's benchmark
+      );
+      const extraBenches: Record<string, Map<MonthKey, number>> = {};
+      if (attrTickers.length > 0) {
+        const fetched = await fetchMonthlyPrices({
+          tickers: attrTickers,
+          startDate: study.startDate,
+          endDate: study.endDate,
+        });
+        for (const t of attrTickers) {
+          if (fetched[t]) extraBenches[t] = fetched[t];
+        }
+      }
+      // Include the primary benchmark too (SPY by default).
+      extraBenches[benchTicker] = benchmark;
+      benchmarkAttribution = buildBenchmarkAttribution(
+        path.returns,
+        extraBenches,
+        path.axis,
+      );
+    } catch (attrErr) {
+      console.warn("[backtest] benchmark attribution failed:", attrErr);
+    }
+
     // Phase 4: compute multi-factor breakdown for the *latest* rebalance — gives
     // the Result page concrete Value/Quality/Momentum component scores for the
     // portfolio actually held at end-of-backtest. This is purely diagnostic;
@@ -902,6 +939,10 @@ export async function runBacktest(studyId: string): Promise<void> {
       // Phase 8: robustness report — null when computation failed.
       robustness: robustness
         ? (robustness as unknown as Prisma.InputJsonValue)
+        : Prisma.DbNull,
+      // Phase 9: multi-benchmark attribution — null when fetch / regression failed.
+      benchmarkAttribution: benchmarkAttribution
+        ? (benchmarkAttribution as unknown as Prisma.InputJsonValue)
         : Prisma.DbNull,
     };
     await prisma.studyResult.upsert({

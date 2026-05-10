@@ -107,6 +107,22 @@ interface ApiResult {
   // Phase 8 — robustness report (in/out-of-sample split + bootstrap CI +
   // halve-period metrics). null on legacy studies.
   robustness?: Robustness | null;
+  // Phase 9 — multi-benchmark OLS attribution. null on legacy studies.
+  benchmarkAttribution?: BenchmarkAttribution | null;
+}
+
+interface BenchmarkAttribution {
+  benchmarks: Array<{
+    ticker: string;
+    label: string;
+    description: string;
+    monthsObserved: number;
+    alphaAnnualPct: number;
+    beta: number;
+    rSquared: number;
+    correlation: number;
+  }>;
+  generatedAt: string;
 }
 
 interface Robustness {
@@ -1061,6 +1077,88 @@ function SensitivityTable({
   );
 }
 
+function BenchmarkAttributionCard({
+  data,
+}: {
+  data?: BenchmarkAttribution | null;
+}) {
+  if (!data || data.benchmarks.length === 0) return null;
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">多基准归因</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          策略对各因子 ETF 跑 OLS 回归，看 alpha 是不是只是某种因子敞口的伪装
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50/60">
+              <th className="py-2 px-3 text-xs text-gray-500 text-left font-medium">
+                基准
+              </th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">
+                月数
+              </th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">
+                α (年化)
+              </th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">
+                β
+              </th>
+              <th className="py-2 px-3 text-xs text-gray-500 text-right font-medium">
+                R²
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.benchmarks.map((b) => (
+              <tr key={b.ticker} className="border-b border-gray-100 last:border-0">
+                <td className="py-2 px-3 text-sm">
+                  <div className="text-gray-900 font-medium">{b.label}</div>
+                  <div className="text-xs text-gray-500 leading-tight">
+                    {b.description}
+                  </div>
+                </td>
+                <td className="py-2 px-3 text-sm text-right font-mono text-gray-500">
+                  {b.monthsObserved}
+                </td>
+                <td
+                  className={`py-2 px-3 text-sm text-right font-mono ${
+                    b.alphaAnnualPct > 0
+                      ? "text-green-700"
+                      : b.alphaAnnualPct < 0
+                        ? "text-red-600"
+                        : "text-gray-700"
+                  }`}
+                >
+                  {b.monthsObserved < 2
+                    ? "—"
+                    : `${b.alphaAnnualPct >= 0 ? "+" : ""}${b.alphaAnnualPct.toFixed(2)}%`}
+                </td>
+                <td className="py-2 px-3 text-sm text-right font-mono text-gray-700">
+                  {b.monthsObserved < 2 ? "—" : b.beta.toFixed(2)}
+                </td>
+                <td className="py-2 px-3 text-sm text-right font-mono text-gray-700">
+                  {b.monthsObserved < 2 ? "—" : b.rSquared.toFixed(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500 leading-relaxed">
+        <strong>怎么读：</strong>
+        β=1 → 完全是该 ETF 的代理；β=0 → 完全独立。
+        R²=0.9 → 该 ETF 解释了策略 90% 的方差，所谓 alpha 多半是 noise；
+        R²=0.3 → 策略大部分行为来自其他因素，alpha 更可信。
+        如「相对 MTUM 的 R²=0.85 + α=0.5%」，意味你的策略基本就是动量代理 + 微小残差。
+      </div>
+    </div>
+  );
+}
+
 function RobustnessCard({ data }: { data?: Robustness | null }) {
   if (!data) return null;
   return (
@@ -1713,6 +1811,7 @@ export default function ResultPage() {
         <div className="space-y-5">
           <FactorDiagnostics data={result.factorDiagnostics} />
           <FactorCoverageCard data={result.factorCoverage} />
+          <BenchmarkAttributionCard data={result.benchmarkAttribution} />
           <RobustnessCard data={result.robustness} />
           <ParameterSensitivityCard data={result.parameterSensitivity} />
         </div>

@@ -158,6 +158,9 @@ model StudyResult {
   // Phase 8 — robustness report (in/out-of-sample split + bootstrap CI +
   // subperiod metrics). Null for legacy results that pre-date the column.
   robustness           Json?
+  // Phase 9 — multi-benchmark OLS attribution (alpha/beta/R² vs SPY/QQQ/IWM/
+  // MTUM/IUSV). Null on legacy results.
+  benchmarkAttribution Json?
   createdAt         DateTime @default(now())
 }
 

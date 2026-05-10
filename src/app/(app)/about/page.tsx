@@ -40,6 +40,23 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Phase 9 · 多基准归因",
+    date: "2026-05-11",
+    title: "对 SPY/QQQ/IWM/MTUM/IUSV 跑 OLS，看 alpha 是不是因子伪装",
+    summary:
+      "回测完成后自动拉 5 只因子 ETF 的月度价格，对每只跑一次单变量 OLS 回归，输出 alpha (年化) / beta / R²。如果策略对 MTUM 的 R²=0.85，则所谓 alpha 就是动量因子敞口的别名，不是真 alpha。",
+    highlights: [
+      "新模块 src/lib/backtest/benchmarkAttribution.ts：纯函数 + ATTRIBUTION_BENCHMARKS 列表",
+      "5 个基准 ETF：SPY（市场）/ QQQ（成长）/ IWM（小盘）/ MTUM（动量）/ IUSV（价值）",
+      "OLS 单变量回归：strat = α + β × bench + ε",
+      "Runner 自动拉缺失的 4 只 ETF 月价（SPY 已是回测 benchmark），跑 5 次 OLS",
+      "StudyResult.benchmarkAttribution Json? 持久化，结果页「分析」tab 加 BenchmarkAttributionCard",
+      "+12 个测试（OLS 数学验证、月份对齐、年化 alpha、退化情况）",
+      "已知简化：单变量 OLS 而非 Fama-French 多因子（构造正交因子 returns 工程量大，留给后续 phase）",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
     version: "Phase 8 · OOS 拆分 + Bootstrap 置信区间",
     date: "2026-05-11",
     title: "把 alpha 是否显著、是否依赖某段时间窗口暴露出来",
