@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import {
   ChevronDown,
   ChevronUp,
-  Pencil,
   Loader2,
   Sparkles,
   RefreshCw,
@@ -168,17 +167,11 @@ function Section({
         onClick={() => setOpen(!open)}
       >
         <span className="text-sm font-semibold text-gray-900">{title}</span>
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-blue-600 border border-blue-200 cursor-pointer">
-            <Pencil className="h-3 w-3" />
-            编辑
-          </span>
-          {open ? (
-            <ChevronUp className="h-4 w-4 text-gray-400" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-gray-400" />
-          )}
-        </div>
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-gray-400" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-gray-400" />
+        )}
       </button>
       {open && (
         <div className="px-4 pb-4 pt-2 border-t border-gray-100">{children}</div>

@@ -395,13 +395,13 @@ function UsageGuide() {
         <div className="space-y-2.5 text-sm text-gray-700">
           <DataRow
             source="Yahoo Finance"
-            usage="月度调整收盘价 + 当前快照基本面比率（PE/PB/PS/EV-EBITDA/ROE/毛利率/D-E/营收&EPS 增长）"
-            limit="非官方 API；基本面是 restated（已调整后），存在前视偏差"
+            usage="月度调整收盘价 + 当前快照基本面比率（PE/PB/PS/EV-EBITDA 用于 Value 静态 tilt）"
+            limit="非官方 API；Value 因子仍为 point-in-now，应用于所有历史月，存在前视偏差（Phase 5 计划用 SEC EPS 自算历史 PE 消除）"
           />
           <DataRow
             source="SEC EDGAR XBRL"
-            usage="官方财报数据（10-K / 10-Q），用于 ROE / 毛利率 / 负债权益 / 营收 EPS 增长（自算），保留 filed 时间戳"
-            limit="目前仅用于当前快照；历史 PIT 重建在路线图后续阶段"
+            usage="全历史 10-K filings；ROE / ROIC / 毛利率 / 负债权益 自算，按 90 天 reporting lag 做 PIT-correct 回测"
+            limit="EPS growth 在拆股年份会失真，历史路径中已禁用；ROIC 为简化代理"
           />
           <DataRow
             source="DeepSeek API"
@@ -420,8 +420,8 @@ function UsageGuide() {
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <div>
-              <span className="font-medium">非 PIT：</span>
-              基本面数据为 point-in-now 快照，应用于所有历史月份，回测有前视偏差。
+              <span className="font-medium">混合 PIT：</span>
+              SEC Quality 因子（ROE / ROIC / 毛利率 / D-E）已是 point-in-time（90 天 reporting lag）；Yahoo Value 因子（PE/PB/PS/EV-EBITDA）仍是 point-in-now 静态贴一份，存在前视偏差。
             </div>
           </div>
           <div className="flex items-start gap-2">

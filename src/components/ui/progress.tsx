@@ -10,7 +10,11 @@ export function Progress({
 }: React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root>) {
   return (
     <ProgressPrimitive.Root
-      className={cn("relative h-2 w-full overflow-hidden rounded-full bg-slate-700", className)}
+      className={cn(
+        // Phase 4 follow-up U1: light theme default; pages can override.
+        "relative h-2 w-full overflow-hidden rounded-full bg-gray-100",
+        className,
+      )}
       {...props}
     >
       <ProgressPrimitive.Indicator

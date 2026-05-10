@@ -101,8 +101,47 @@ export default function DataSourcesPage() {
       <div>
         <h1 className="text-xl font-semibold text-gray-900">数据源</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          检查并测试回测使用的数据提供方连接状态
+          回测实际使用的数据提供方与未来规划路线
         </p>
+      </div>
+
+      {/* Phase 4 follow-up U7: actual production data sources, real status. */}
+      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3.5 space-y-2">
+        <div className="text-sm font-medium text-emerald-900 inline-flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4" />
+          回测当前使用的真实数据源
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+          <div className="bg-white rounded-md border border-emerald-200/60 px-3 py-2">
+            <div className="font-medium text-gray-900">Yahoo Finance</div>
+            <div className="text-gray-500 mt-0.5">
+              月度调整收盘价 + 当前快照基本面比率
+            </div>
+          </div>
+          <div className="bg-white rounded-md border border-emerald-200/60 px-3 py-2">
+            <div className="font-medium text-gray-900">SEC EDGAR XBRL</div>
+            <div className="text-gray-500 mt-0.5">
+              全历史 10-K filings；Quality 因子 PIT 来源
+            </div>
+          </div>
+          <div className="bg-white rounded-md border border-emerald-200/60 px-3 py-2">
+            <div className="font-medium text-gray-900">DeepSeek API</div>
+            <div className="text-gray-500 mt-0.5">
+              研究计划生成 + 结论解读
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Honest demo banner — the panels below are roadmap placeholders, not
+          live connections. Adds before-the-fact context to avoid the
+          previous "为什么富途显示红字未连接" confusion. */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
+        <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <div>
+          <span className="font-medium">演示页面</span>
+          ：下面的富途 OpenD / 基本面覆盖率 / 另类数据面板是路线图占位，**不是当前生产配置**。「测试连接」「拉取 K 线」按钮是 UI 草稿，不会发起真实请求。
+        </div>
       </div>
 
       {/* Tabs */}
@@ -135,7 +174,7 @@ export default function DataSourcesPage() {
                   <h3 className="text-sm font-semibold text-gray-900">
                     富途 OpenD
                   </h3>
-                  <Badge variant="danger">未连接</Badge>
+                  <Badge variant="muted">演示 · 路线图</Badge>
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
                   实时美股行情与历史 K 线接口

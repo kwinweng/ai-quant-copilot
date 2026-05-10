@@ -522,12 +522,12 @@ function FilterBar({
             }`}
           >
             {v === "active"
-              ? "全部"
+              ? "活跃"
               : v === "favorites"
                 ? "收藏"
                 : v === "archived"
-                  ? "已归档"
-                  : "含归档"}
+                  ? "仅归档"
+                  : "全部"}
           </button>
         ))}
         <div className="ml-auto inline-flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-md px-2 py-1 flex-1 max-w-xs">
@@ -850,22 +850,27 @@ export default function Dashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <div className="flex items-center gap-6 text-xs">
+          <div className="flex items-center gap-x-6 gap-y-2 text-xs flex-wrap">
             <div className="flex items-center gap-1.5">
-              <div className="h-2 w-2 rounded-full bg-red-400" />
-              <span className="text-gray-600">富途 OpenD</span>
-              <span className="text-red-600 font-medium">未连接</span>
+              <div className="h-2 w-2 rounded-full bg-green-400" />
+              <span className="text-gray-600">Yahoo Finance</span>
+              <span className="text-green-600 font-medium">已接入</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="h-2 w-2 rounded-full bg-green-400" />
-              <span className="text-gray-600">Mock 数据</span>
-              <span className="text-green-600 font-medium">正常</span>
+              <span className="text-gray-600">SEC EDGAR</span>
+              <span className="text-green-600 font-medium">已接入</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-green-400" />
+              <span className="text-gray-600">DeepSeek</span>
+              <span className="text-green-600 font-medium">已接入</span>
             </div>
             <Link
               href="/data-sources"
               className="text-blue-600 hover:underline ml-auto text-xs"
             >
-              配置数据源 →
+              查看详情 →
             </Link>
           </div>
         </CardContent>

@@ -175,7 +175,6 @@ const TABS = [
   { key: "performance", label: "表现" },
   { key: "risk", label: "风险" },
   { key: "analysis", label: "分析" },
-  { key: "logs", label: "日志" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -298,7 +297,7 @@ function MetricsTable({ result }: { result: ApiResult }) {
             <MetricRow label="Beta" strategy={m.strategy.beta} spy={m.spy.beta} />
             <MetricRow
               label="Alpha (年化)"
-              strategy={`+${m.strategy.alpha}%`}
+              strategy={`${m.strategy.alpha >= 0 ? "+" : ""}${m.strategy.alpha}%`}
               spy="0%"
               strategyNum={m.strategy.alpha}
               spyNum={0}
@@ -1448,17 +1447,6 @@ export default function ResultPage() {
           <FactorBreakdownCard data={result.factorBreakdown} />
           <ParameterSensitivityCard data={result.parameterSensitivity} />
           <RebalanceHistoryCard history={result.rebalanceHistory} />
-        </div>
-      )}
-
-      {activeTab === "logs" && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-900">执行日志</h3>
-          </div>
-          <div className="px-4 py-3 text-sm text-gray-500">
-            日志数据在 Stage 2 中将持久化到 StudyProgress.logs；本视图为占位。
-          </div>
         </div>
       )}
 
