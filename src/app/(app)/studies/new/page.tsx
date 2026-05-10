@@ -1,9 +1,16 @@
 "use client";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronUp, Copy, Loader2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 
 const EXAMPLE_HYPOTHESIS =
   "美股大盘股中，综合质量因子（ROIC/ROE/毛利率）与价值因子（PE/PB/PS）的组合策略，在扣除交易成本后，10 年回测期内可超越 SPY 基准。";
@@ -53,6 +60,38 @@ function NewStudyForm() {
   >("idle");
   const [cloneSource, setCloneSource] = useState<SourceStudy | null>(null);
   const cloneAppliedRef = useRef(false);
+  const queryAppliedRef = useRef(false);
+  const [coachPrefilled, setCoachPrefilled] = useState(false);
+
+  // Sprint #3: when launched from the coach or example library, the URL has
+  // ?hypothesis=…&universe=…&… query params. Prefill the form on first mount.
+  // Skips if cloneFrom is set (clone is the dominant signal — fetches the
+  // source study, which would clobber any query-string defaults anyway).
+  useEffect(() => {
+    if (queryAppliedRef.current) return;
+    if (cloneFrom) return; // clone path takes over below.
+    queryAppliedRef.current = true;
+    const q = searchParams;
+    const qHypothesis = q.get("hypothesis");
+    if (!qHypothesis) return;
+    setHypothesis(qHypothesis);
+    const qUniverse = q.get("universe");
+    if (qUniverse) setUniverse(qUniverse);
+    const qStart = q.get("startDate");
+    if (qStart) setStartDate(qStart);
+    const qEnd = q.get("endDate");
+    if (qEnd) setEndDate(qEnd);
+    const qRebal = q.get("rebalance");
+    if (qRebal) setRebalance(qRebal);
+    const qBench = q.get("benchmark");
+    if (qBench) setBenchmark(qBench);
+    const qTx = q.get("txCostBps");
+    if (qTx && !Number.isNaN(Number(qTx))) setTxCost(qTx);
+    const qFm = q.get("factorMix");
+    if (qFm === "momentum" || qFm === "multifactor") setFactorMix(qFm);
+    setCoachPrefilled(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloneFrom]);
 
   // Phase 3.1 Copy & Modify: when ?cloneFrom=<id> is present, fetch the source
   // study once and prefill the form. We don't auto-submit; the user reviews
@@ -120,12 +159,40 @@ function NewStudyForm() {
   return (
     <div className="p-6 max-w-3xl space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">创建新研究</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          描述您的投资假设，AI 将为您生成完整的研究计划
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">创建新研究</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            描述您的投资假设，AI 将为您生成完整的研究计划
+          </p>
+        </div>
+        {!cloneFrom && !coachPrefilled && (
+          <Link href="/studies/coach">
+            <Button
+              variant="outline"
+              size="sm"
+              className="inline-flex items-center gap-1.5"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+              不知道写什么？让 AI 帮你
+            </Button>
+          </Link>
+        )}
       </div>
+
+      {coachPrefilled && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm flex items-start gap-2">
+          <Sparkles className="h-4 w-4 text-emerald-700 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="text-emerald-900 font-medium">
+              已从 AI 教练 / 例子库预填
+            </div>
+            <div className="text-xs text-emerald-700 mt-0.5">
+              所有字段都可以再修改。确认无误后点「生成研究计划」。
+            </div>
+          </div>
+        </div>
+      )}
 
       {cloneFrom && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-start gap-2">

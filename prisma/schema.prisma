@@ -192,6 +192,10 @@ model AiUsageDay {
   date            DateTime // truncated to YYYY-MM-DD UTC
   planCalls       Int      @default(0)
   conclusionCalls Int      @default(0)
+  // Phase 4 follow-up Sprint #3: hypothesis coach turns. Counted separately
+  // because a coach session can fire many turns and we want to monitor /
+  // tune its quota independently from plan/conclusion.
+  coachCalls      Int      @default(0)
   updatedAt       DateTime @updatedAt
 
   @@id([userId, date])

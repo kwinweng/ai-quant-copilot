@@ -40,6 +40,56 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Sprint #3 · AI 假设教练",
+    date: "2026-05-10",
+    title: "对话式假设设计 + 28 条分级例子库",
+    summary:
+      "面向量化新手：通过 3-12 轮对话把模糊的投资想法整理成可回测的假设；同时附带 28 条按初/中/高级分类的现成例子，支持一键预填表单。",
+    highlights: [
+      "新路由 /studies/coach 和侧边栏「AI 教练」入口",
+      "DeepSeek 流式对话，每轮一个聚焦问题，AI 自适应轮数",
+      "AI 完成时输出 [FINAL] + JSON，前端识别后展示「进入新研究」CTA",
+      "例子库 28 条：8 初级 + 10 中级 + 8 高级 + 2 敏感性，按主题分类",
+      "/studies/new 新增 ?hypothesis=...&factorMix=... 等 query 参数预填",
+      "AiUsageDay.coachCalls 单独计费，每用户每日 60 轮",
+      "首页 + 新研究页加「不知道写什么？让 AI 帮你」入口",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
+    version: "Sprint #2 · UI 大扫除",
+    date: "2026-05-10",
+    title: "shadcn 主题统一 + 7 项 UX 修复",
+    summary:
+      "独立 UI 评审发现的高 ROI 改进打包上线：shadcn 三个原始件改浅色默认；仪表盘 tab 命名理顺；删除 logs 死链；About 文案与 PIT 状态对齐；数据源页演示标记；plan 页假按钮删除；Alpha 负数显示修复。",
+    highlights: [
+      "Card / Button / Progress 默认 light theme，省去全站样板",
+      "仪表盘视图：活跃 / 收藏 / 仅归档 / 全部（语义自洽）",
+      "结果页删 logs 死 tab",
+      "About 页「混合 PIT」披露与最新 Phase 4.2 对齐",
+      "/data-sources 顶部加真实数据源绿条 + 演示横幅",
+      "Plan 页每个 section 旁的假「编辑」按钮全删",
+      "Alpha 负数不再显示 +-X%",
+    ],
+    badge: { label: "infra", tone: "infra" },
+  },
+  {
+    version: "Sprint #1 · 紧急修复",
+    date: "2026-05-10",
+    title: "5 个 CRITICAL 代码问题 + cancel 竞态",
+    summary:
+      "独立代码评审发现的关键 bug 一次清完：start/cancel 竞态条件、PIT cutoff 一个月偏差、SEC anchor truthy bug、EPS 拆股污染、SEC 惊群。",
+    highlights: [
+      "C2 — /start 改为原子 updateMany，不会再因并发跑两次",
+      "H1 — /cancel 同样原子化，不会覆盖 COMPLETED",
+      "C1 — PIT cutoff 修一个月偏差，多因子回测每月用上正确 filing",
+      "C3 — SEC fetch() 的 anchor 三元 bug 修复，fiscalDate 不再被设成今天",
+      "C4 — 历史 EPS growth 在拆股年禁用，不再出现 100x 假增长",
+      "C5 — SEC 历史拉取加 in-flight Promise dedup，避免 429",
+    ],
+    badge: { label: "fix", tone: "fix" },
+  },
+  {
     version: "Phase 4.2 · PIT 历史快照",
     date: "2026-05-10",
     title: "消除 SEC 字段的前视偏差",

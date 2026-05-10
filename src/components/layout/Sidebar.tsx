@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Plus,
+  Sparkles,
   GitCompare,
   Database,
   Info,
@@ -14,6 +15,7 @@ import {
 
 const navItems = [
   { href: "/", label: "仪表盘", icon: LayoutDashboard, exact: true },
+  { href: "/studies/coach", label: "AI 教练", icon: Sparkles, exact: false },
   { href: "/studies/new", label: "新研究", icon: Plus, exact: true },
   { href: "/studies/compare", label: "对比", icon: GitCompare, exact: false },
   { href: "/data-sources", label: "数据源", icon: Database, exact: false },
@@ -134,15 +136,26 @@ export function MobileTopBar() {
   );
 }
 
+// Sprint #3: mobile bar is space-constrained; only show the 4 most-used
+// destinations. 数据源 / 关于 stay accessible via the desktop sidebar (and
+// in-page links from the dashboard footer / about page entry).
+const MOBILE_NAV_HREFS = new Set([
+  "/",
+  "/studies/coach",
+  "/studies/new",
+  "/studies/compare",
+]);
+
 export function MobileTabBar() {
   const pathname = usePathname();
+  const mobileItems = navItems.filter((item) => MOBILE_NAV_HREFS.has(item.href));
 
   return (
     <nav
       className="lg:hidden fixed bottom-0 left-0 right-0 z-20 bg-white border-t border-gray-200 flex"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
-      {navItems.map((item) => {
+      {mobileItems.map((item) => {
         const Icon = item.icon;
         const active = isActive(pathname, item.href, item.exact);
         return (

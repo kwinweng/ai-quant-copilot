@@ -79,11 +79,14 @@ export function describeAiError(err: unknown): string {
 // Per-user per-day quota — cheap protection against runaway costs.
 // ============================================================
 
-export type UsageKind = "plan" | "conclusion";
+export type UsageKind = "plan" | "conclusion" | "coach";
 
 const DEFAULT_QUOTAS: Record<UsageKind, number> = {
   plan: 10,
   conclusion: 20,
+  // Coach turns: a single dialog can take 3-12 turns (per the design),
+  // so allow ~4 sessions per day before throttling.
+  coach: 60,
 };
 
 function utcDateKey(d = new Date()): Date {
@@ -109,12 +112,14 @@ export async function assertUsageQuota(
   const limit = DEFAULT_QUOTAS[kind];
   const row = await prisma.aiUsageDay.findUnique({
     where: { userId_date: { userId, date } },
-    select: { planCalls: true, conclusionCalls: true },
+    select: { planCalls: true, conclusionCalls: true, coachCalls: true },
   });
   const used = row
     ? kind === "plan"
       ? row.planCalls
-      : row.conclusionCalls
+      : kind === "conclusion"
+        ? row.conclusionCalls
+        : row.coachCalls
     : 0;
   if (used >= limit) {
     return { exceeded: true, used, limit, kind };
@@ -128,7 +133,11 @@ export async function incrementUsage(
 ): Promise<void> {
   const date = utcDateKey();
   const inc =
-    kind === "plan" ? { planCalls: { increment: 1 } } : { conclusionCalls: { increment: 1 } };
+    kind === "plan"
+      ? { planCalls: { increment: 1 } }
+      : kind === "conclusion"
+        ? { conclusionCalls: { increment: 1 } }
+        : { coachCalls: { increment: 1 } };
   await prisma.aiUsageDay.upsert({
     where: { userId_date: { userId, date } },
     create: {
@@ -136,6 +145,7 @@ export async function incrementUsage(
       date,
       planCalls: kind === "plan" ? 1 : 0,
       conclusionCalls: kind === "conclusion" ? 1 : 0,
+      coachCalls: kind === "coach" ? 1 : 0,
     },
     update: inc,
   });
@@ -400,4 +410,184 @@ export async function generateStudyConclusion(
     // Model deviated from JSON mode — show the raw text rather than 500.
     return { conclusion: raw, aiExplanation: [] };
   }
+}
+
+// ============================================================
+// Sprint #3 — hypothesis coach (multi-turn dialogue)
+//
+// Goal: walk a quant beginner through a 3-12 turn dialogue and emit a
+// fully-formed hypothesis + parameter dict at the end.
+//
+// The coach asks ONE focused question per turn, with at most 3 suggested
+// answers when relevant. When the model thinks the hypothesis is complete,
+// it returns a special "[FINAL]" line followed by a JSON object with the
+// shape consumed by /studies/new.
+// ============================================================
+
+import { exampleSummaryForFewShot } from "@/data/exampleHypotheses";
+
+const COACH_SYSTEM_PROMPT_TEMPLATE = `你是一名耐心的量化研究教练，目标是通过对话帮助量化新手把模糊的投资想法逐步完善为一个**完整、可回测、参数齐全**的研究假设。
+
+## 用户画像
+- 有投资经验，但量化建模经验有限。
+- 对常见因子（动量、价值、质量、低波）有耳闻但不熟悉细节。
+- 容易被参数选择搞晕（回看期、再平衡频率、桶宽）。
+
+## 对话策略
+1. **每轮只问一个最关键的问题**。绝不一次问 2 个问题。
+2. **必要时给出 2-3 个明确选项**，每个选项一句话解释取舍。
+3. 用户回答后，**简短复述**对方的方向再追问下一项，让用户感到被理解。
+4. **避免术语冷启动**：先问"你最近对哪类股票/市场现象有想法？"再深入参数。
+5. **轮数自适应**：用户输入清晰且经验足时 3-5 轮可结束；用户回答简短或要求更多解释时 6-12 轮。
+
+## 必须收集到的字段
+1. **hypothesis** — 一句话假设，必须包含主体（哪类股票）+ 信号（什么因子）+ 时间窗口 + 基准
+2. **factorMix** — "momentum"（仅动量）或 "multifactor"（多因子）
+3. **rebalance** — "月度" 或 "季度"
+4. **universe** — 默认 "US Large Cap (Russell 1000)"，除非用户明确要求其他
+5. **startDate / endDate** — 默认 2014-01-01 → 2024-01-01（10 年）
+6. **benchmark** — "SPY"/"QQQ"/"IWM"，默认 SPY
+7. **txCostBps** — 默认 5
+
+## 输出格式
+
+### 仍在对话阶段（绝大多数轮次）
+直接输出对用户的简体中文回应，不要包裹任何 JSON 或代码块。
+
+### 准备结束对话时（最后一轮）
+**必须**且**只**输出以下两段：
+
+第一段：一句话总结收集到的假设。
+第二段：以独立一行 \`[FINAL]\` 开头，紧跟一个 JSON 对象，字段如下：
+
+\`\`\`
+[FINAL]
+{
+  "hypothesis": "完整的一句话假设",
+  "factorMix": "momentum" 或 "multifactor",
+  "rebalance": "月度" 或 "季度",
+  "universe": "US Large Cap (Russell 1000)",
+  "startDate": "2014-01-01",
+  "endDate": "2024-01-01",
+  "benchmark": "SPY",
+  "txCostBps": 5
+}
+\`\`\`
+
+JSON 必须可被 JSON.parse 解析。不要在 JSON 后追加任何文字。
+
+## 例子库（仅供你参考方向，不要直接照抄；用户可能想要你没列出的方向）
+${"<<EXAMPLES>>"}`;
+
+interface CoachMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Stream one coach turn. Caller passes the full conversation history; we
+ * prepend the system prompt with the example library injected as few-shot
+ * context. Yields text deltas like streamStudyPlan does.
+ */
+export async function* streamCoachTurn(
+  history: CoachMessage[],
+): AsyncGenerator<string, void, void> {
+  const client = getClient();
+  const systemPrompt = COACH_SYSTEM_PROMPT_TEMPLATE.replace(
+    "<<EXAMPLES>>",
+    exampleSummaryForFewShot(),
+  );
+
+  const stream = await client.chat.completions.create({
+    model: MODEL,
+    stream: true,
+    stream_options: { include_usage: true },
+    temperature: 0.7,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...history.map((m) => ({ role: m.role, content: m.content })),
+    ],
+  });
+
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) yield delta;
+  }
+}
+
+export interface CoachFinalPayload {
+  hypothesis: string;
+  factorMix: "momentum" | "multifactor";
+  rebalance: string;
+  universe: string;
+  startDate: string;
+  endDate: string;
+  benchmark: string;
+  txCostBps: number;
+}
+
+/**
+ * Detect whether a (possibly partial) coach response contains the [FINAL]
+ * sentinel + JSON block. Returns the parsed payload or null. Robust against
+ * surrounding code-fence, leading whitespace, and post-JSON garbage.
+ */
+export function parseCoachFinal(text: string): CoachFinalPayload | null {
+  const sentinelIdx = text.indexOf("[FINAL]");
+  if (sentinelIdx === -1) return null;
+  const after = text.slice(sentinelIdx + "[FINAL]".length);
+  // Find the first '{' and the matching final '}' by brace-counting.
+  const start = after.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < after.length; i++) {
+    if (after[i] === "{") depth++;
+    else if (after[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end === -1) return null;
+  const jsonRaw = after.slice(start, end + 1);
+  try {
+    const parsed = JSON.parse(jsonRaw) as Partial<CoachFinalPayload>;
+    if (
+      typeof parsed.hypothesis !== "string" ||
+      typeof parsed.universe !== "string" ||
+      typeof parsed.startDate !== "string" ||
+      typeof parsed.endDate !== "string" ||
+      typeof parsed.rebalance !== "string" ||
+      typeof parsed.benchmark !== "string" ||
+      typeof parsed.txCostBps !== "number"
+    ) {
+      return null;
+    }
+    const factorMix =
+      parsed.factorMix === "multifactor" ? "multifactor" : "momentum";
+    return {
+      hypothesis: parsed.hypothesis,
+      factorMix,
+      rebalance: parsed.rebalance,
+      universe: parsed.universe,
+      startDate: parsed.startDate,
+      endDate: parsed.endDate,
+      benchmark: parsed.benchmark,
+      txCostBps: parsed.txCostBps,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Strip the [FINAL]…JSON block from a coach response so we can show the
+ * preceding human-readable summary in the chat without leaking JSON.
+ */
+export function stripCoachFinalBlock(text: string): string {
+  const idx = text.indexOf("[FINAL]");
+  if (idx === -1) return text;
+  return text.slice(0, idx).trim();
 }

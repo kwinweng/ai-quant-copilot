@@ -15,6 +15,7 @@ import {
   ArchiveRestore,
   Search,
   Tag as TagIcon,
+  Sparkles,
   X,
 } from "lucide-react";
 
@@ -746,11 +747,18 @@ export default function Dashboard() {
               : `${summary.completed} 已完成 · ${summary.favorites} 收藏 · ${summary.archived} 归档`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/studies/compare">
-            <Button variant="outline" className="border-gray-200 text-gray-700">
-              对比研究
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link href="/studies/coach">
+            <Button
+              variant="outline"
+              className="border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 inline-flex items-center gap-1.5"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              AI 教练
             </Button>
+          </Link>
+          <Link href="/studies/compare">
+            <Button variant="outline">对比研究</Button>
           </Link>
           <Link href="/studies/new">
             <Button className="bg-blue-600 hover:bg-blue-700 text-white">
