@@ -159,8 +159,12 @@ export function MobileTabBar() {
   const mobileItems = navItems.filter((item) => MOBILE_NAV_HREFS.has(item.href));
 
   return (
+    // Mobile bar redesigned for breathing room — bumped from ~52px to ~72px
+    // tall, larger icons (22px) and labels (11px), subtle top shadow to lift
+    // it off the page. Active tab gets a small blue accent line above it for
+    // an anchor cue independent of color.
     <nav
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-20 bg-white border-t border-gray-200 flex items-stretch"
+      className="lg:hidden fixed bottom-0 left-0 right-0 z-20 bg-white border-t border-gray-200 flex items-stretch shadow-[0_-2px_10px_-4px_rgba(15,23,42,0.08)]"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       {mobileItems.map((item) => {
@@ -174,21 +178,24 @@ export function MobileTabBar() {
               key={item.href}
               href={item.href}
               aria-label={item.label}
-              className="flex-1 flex flex-col items-center justify-end gap-1 pb-1.5 relative"
+              className="flex-1 flex flex-col items-center justify-end gap-1.5 pb-2 relative"
             >
+              {/* Floating action button — 56×56 circular, raised 28px above
+                  the bar with a 4px white ring acting as a "cutout" so the
+                  bar's top border visually wraps around it. */}
               <span
                 className={cn(
-                  "inline-flex h-12 w-12 items-center justify-center rounded-full shadow-md ring-4 ring-white -mt-5 transition-colors",
+                  "inline-flex h-14 w-14 items-center justify-center rounded-full shadow-lg ring-4 ring-white -mt-7 transition-colors",
                   active
                     ? "bg-blue-700 text-white"
-                    : "bg-blue-600 text-white hover:bg-blue-700",
+                    : "bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-700",
                 )}
               >
-                <Icon className="h-6 w-6" strokeWidth={2.5} />
+                <Icon className="h-7 w-7" strokeWidth={2.5} />
               </span>
               <span
                 className={cn(
-                  "text-[10px] font-medium leading-none",
+                  "text-[11px] font-medium leading-none",
                   active ? "text-blue-700" : "text-gray-500",
                 )}
               >
@@ -203,12 +210,22 @@ export function MobileTabBar() {
             key={item.href}
             href={item.href}
             className={cn(
-              "flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors",
-              active ? "text-blue-600" : "text-gray-500 hover:text-gray-700"
+              "flex-1 flex flex-col items-center justify-center gap-1 py-3 transition-colors relative",
+              active
+                ? "text-blue-600"
+                : "text-gray-500 hover:text-gray-700 active:text-gray-900",
             )}
           >
-            <Icon className="h-5 w-5" />
-            <span className="text-[10px] font-medium leading-none">
+            {/* Active accent line — 24px wide, blue, sits flush with the bar's
+                top border so it visually replaces it for the active tab. */}
+            {active && (
+              <span
+                aria-hidden="true"
+                className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-6 bg-blue-600 rounded-b-full"
+              />
+            )}
+            <Icon className="h-[22px] w-[22px]" />
+            <span className="text-[11px] font-medium leading-none">
               {item.label}
             </span>
           </Link>
