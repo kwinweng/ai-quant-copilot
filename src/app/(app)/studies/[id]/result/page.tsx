@@ -2,18 +2,25 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Download,
-  Share2,
   Sparkles,
   ArrowLeft,
   Loader2,
   RefreshCw,
+  Copy,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import {
+  generateResultMarkdown,
+  downloadMarkdown,
+} from "@/lib/exportMarkdown";
 import {
   LineChart,
   Line,
@@ -41,6 +48,38 @@ interface MetricsBlock {
   winRate: number | null;
 }
 
+interface MonthlyReturn {
+  date: string;
+  strategy: number;
+  benchmark: number;
+  active: number;
+}
+
+interface RebalanceEntry {
+  date: string;
+  holdings: string[];
+  turnover: number;
+  txCostApplied: number;
+}
+
+interface DataQuality {
+  universeSize?: number;
+  universeNote?: string;
+  survivorshipBias?: boolean;
+  survivorshipNote?: string;
+  factorType?: string;
+  factorTypeNote?: string;
+  advisoryDisclaimer?: string;
+  benchmarkTicker?: string;
+  backtestMonths?: number;
+  rebalanceCount?: number;
+  priceCoverage?: {
+    totalDataPoints?: number;
+    missingTickers?: string[];
+    coveragePct?: number;
+  };
+}
+
 interface ApiResult {
   conclusion: string;
   metrics: { strategy: MetricsBlock & { winRate: number; turnover: number }; spy: MetricsBlock };
@@ -56,11 +95,41 @@ interface ApiResult {
     spread: number;
   }[];
   aiExplanation: string[];
+  // Phase 3.1 — optional in TypeScript so legacy seed/mock results without
+  // these fields render gracefully.
+  monthlyReturns?: MonthlyReturn[];
+  rebalanceHistory?: RebalanceEntry[];
+  dataQuality?: DataQuality;
+  parameterSensitivity?: ParameterSensitivity | null;
+}
+
+interface SensitivityVariant {
+  label: string;
+  cagr: number;
+  sharpe: number;
+  maxDrawdown: number;
+  alpha: number;
+  informationRatio: number | null;
+  isBaseline: boolean;
+}
+
+interface ParameterSensitivity {
+  baseline: {
+    lookbackMonths: number;
+    skipMonths: number;
+    rebalanceMonths: number;
+    topQuintilePct: number;
+  };
+  byLookback: SensitivityVariant[];
+  byRebalance: SensitivityVariant[];
+  byQuintile: SensitivityVariant[];
+  generatedAt: string;
 }
 
 interface ApiStudy {
   id: string;
   title: string;
+  hypothesis: string;
   status: string;
   universe: string;
   startDate: string;
@@ -514,7 +583,415 @@ function AIKeyPoints({
   );
 }
 
+// ====================================================================
+// Phase 3.1 sections — Data Quality, Annual Performance, Best/Worst
+// Months, Rebalance History.
+// ====================================================================
+
+function DataQualityCard({ dq }: { dq?: DataQuality }) {
+  // Even if dq is empty (legacy result), render a hard-coded baseline so the
+  // disclaimer is always present per Phase 3.1 requirement.
+  const universeNote =
+    dq?.universeNote ??
+    "当前股票池为静态 30 只美股大市值列表（硬编码），不是历史完整 S&P 500 成分股";
+  const survivorshipNote =
+    dq?.survivorshipNote ??
+    "因为股票池在整个回测窗口里固定，已退市/被剔除指数的标的不在样本里，回测结果存在幸存者偏差";
+  const factorTypeNote =
+    dq?.factorTypeNote ??
+    "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子";
+  const advisoryDisclaimer =
+    dq?.advisoryDisclaimer ?? "本研究结果仅供研究和教育用途，不构成投资建议";
+  const coverage = dq?.priceCoverage;
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-amber-200 flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 text-amber-600" />
+        <h3 className="text-sm font-semibold text-amber-900">数据质量与偏差</h3>
+        <span className="text-xs text-amber-700 ml-auto">阅读前请知悉</span>
+      </div>
+      <div className="px-4 py-3 space-y-2 text-sm">
+        <div className="flex gap-2">
+          <span className="text-amber-700 shrink-0">•</span>
+          <p className="text-gray-800">
+            <span className="font-medium">股票池构成：</span>
+            {universeNote}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-amber-700 shrink-0">•</span>
+          <p className="text-gray-800">
+            <span className="font-medium">幸存者偏差：</span>
+            {survivorshipNote}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-amber-700 shrink-0">•</span>
+          <p className="text-gray-800">
+            <span className="font-medium">因子类型：</span>
+            {factorTypeNote}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-amber-700 shrink-0">•</span>
+          <p className="text-gray-800">
+            <span className="font-medium">免责声明：</span>
+            {advisoryDisclaimer}
+          </p>
+        </div>
+        {coverage && (
+          <div className="mt-2 pt-2 border-t border-amber-200/60 text-xs text-amber-900/80 flex flex-wrap gap-x-4 gap-y-1">
+            {coverage.totalDataPoints !== undefined && (
+              <span>价格数据点：{coverage.totalDataPoints}</span>
+            )}
+            {coverage.coveragePct !== undefined && (
+              <span>覆盖率：约 {coverage.coveragePct}%</span>
+            )}
+            {coverage.missingTickers && coverage.missingTickers.length > 0 && (
+              <span>
+                缺失标的：{coverage.missingTickers.length} 只（
+                {coverage.missingTickers.slice(0, 5).join(", ")}
+                {coverage.missingTickers.length > 5 ? "…" : ""}）
+              </span>
+            )}
+            {dq?.benchmarkTicker && <span>基准：{dq.benchmarkTicker}</span>}
+            {dq?.backtestMonths !== undefined && (
+              <span>交易月数：{dq.backtestMonths}</span>
+            )}
+            {dq?.rebalanceCount !== undefined && (
+              <span>再平衡次数：{dq.rebalanceCount}</span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AnnualReturnsTable({
+  data,
+}: {
+  data: ApiResult["annualReturns"];
+}) {
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">年度收益明细</h3>
+      </div>
+      <div className="px-4 py-2 overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-200">
+              <th className="py-2 text-xs text-gray-400 text-left font-medium">年份</th>
+              <th className="py-2 text-xs text-gray-400 text-right font-medium">策略</th>
+              <th className="py-2 text-xs text-gray-400 text-right font-medium">基准</th>
+              <th className="py-2 text-xs text-gray-400 text-right font-medium">超额</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((a) => {
+              const excess = Math.round((a.strategy - a.spy) * 100) / 100;
+              return (
+                <tr key={a.year} className="border-b border-gray-100 last:border-0">
+                  <td className="py-2 text-sm text-gray-900 font-medium">{a.year}</td>
+                  <td
+                    className={`py-2 text-sm text-right font-semibold ${a.strategy >= 0 ? "text-gray-900" : "text-red-600"}`}
+                  >
+                    {a.strategy >= 0 ? "+" : ""}
+                    {a.strategy}%
+                  </td>
+                  <td className="py-2 text-sm text-gray-500 text-right">
+                    {a.spy >= 0 ? "+" : ""}
+                    {a.spy}%
+                  </td>
+                  <td
+                    className={`py-2 text-sm text-right font-medium ${excess >= 0 ? "text-green-600" : "text-red-600"}`}
+                  >
+                    {excess >= 0 ? "+" : ""}
+                    {excess}%
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function BestWorstMonthsCard({
+  monthly,
+  n = 5,
+}: {
+  monthly?: MonthlyReturn[];
+  n?: number;
+}) {
+  if (!monthly || monthly.length === 0) return null;
+  const sorted = [...monthly].sort((a, b) => b.strategy - a.strategy);
+  const best = sorted.slice(0, n);
+  const worst = sorted.slice(-n).reverse();
+  const renderRow = (m: MonthlyReturn) => (
+    <tr key={m.date} className="border-b border-gray-100 last:border-0">
+      <td className="py-1.5 text-sm text-gray-900 font-mono">{m.date}</td>
+      <td
+        className={`py-1.5 text-sm text-right font-semibold ${m.strategy >= 0 ? "text-green-600" : "text-red-600"}`}
+      >
+        {(m.strategy * 100).toFixed(2)}%
+      </td>
+      <td className="py-1.5 text-sm text-gray-500 text-right">
+        {(m.benchmark * 100).toFixed(2)}%
+      </td>
+      <td
+        className={`py-1.5 text-sm text-right ${m.active >= 0 ? "text-green-700" : "text-red-700"}`}
+      >
+        {(m.active * 100).toFixed(2)}%
+      </td>
+    </tr>
+  );
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">最佳 / 最差月份</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          按策略月度收益排序的极值（共 {monthly.length} 个月）
+        </p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-100">
+        <div className="px-4 py-2">
+          <div className="text-xs font-medium text-green-700 uppercase tracking-wide mb-1">
+            ↑ 最佳 {best.length}
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr>
+                <th className="py-1 text-xs text-gray-400 text-left font-medium">月份</th>
+                <th className="py-1 text-xs text-gray-400 text-right font-medium">策略</th>
+                <th className="py-1 text-xs text-gray-400 text-right font-medium">基准</th>
+                <th className="py-1 text-xs text-gray-400 text-right font-medium">超额</th>
+              </tr>
+            </thead>
+            <tbody>{best.map(renderRow)}</tbody>
+          </table>
+        </div>
+        <div className="px-4 py-2">
+          <div className="text-xs font-medium text-red-700 uppercase tracking-wide mb-1">
+            ↓ 最差 {worst.length}
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr>
+                <th className="py-1 text-xs text-gray-400 text-left font-medium">月份</th>
+                <th className="py-1 text-xs text-gray-400 text-right font-medium">策略</th>
+                <th className="py-1 text-xs text-gray-400 text-right font-medium">基准</th>
+                <th className="py-1 text-xs text-gray-400 text-right font-medium">超额</th>
+              </tr>
+            </thead>
+            <tbody>{worst.map(renderRow)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RebalanceHistoryCard({
+  history,
+}: {
+  history?: RebalanceEntry[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!history || history.length === 0) return null;
+  const visible = expanded ? history : history.slice(-12).reverse();
+  const showToggle = history.length > 12;
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">再平衡历史</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            共 {history.length} 次再平衡
+            {showToggle && !expanded && `，仅显示最近 12 次`}
+          </p>
+        </div>
+        {showToggle && (
+          <button
+            type="button"
+            className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? (
+              <>
+                <ChevronUp className="h-3 w-3" /> 折叠
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3 w-3" /> 展开全部
+              </>
+            )}
+          </button>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50/50">
+              <th className="py-2 px-4 text-xs text-gray-400 text-left font-medium">日期</th>
+              <th className="py-2 px-4 text-xs text-gray-400 text-left font-medium">持仓（标的）</th>
+              <th className="py-2 px-4 text-xs text-gray-400 text-right font-medium">单边换手</th>
+              <th className="py-2 px-4 text-xs text-gray-400 text-right font-medium">交易成本</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => (
+              <tr key={r.date} className="border-b border-gray-100 last:border-0">
+                <td className="py-2 px-4 text-sm text-gray-900 font-mono whitespace-nowrap">
+                  {r.date}
+                </td>
+                <td className="py-2 px-4 text-xs text-gray-700">
+                  <span className="inline-flex flex-wrap gap-1">
+                    {r.holdings.map((h) => (
+                      <span
+                        key={h}
+                        className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium font-mono"
+                      >
+                        {h}
+                      </span>
+                    ))}
+                  </span>
+                </td>
+                <td className="py-2 px-4 text-sm text-gray-700 text-right">
+                  {(r.turnover * 100).toFixed(1)}%
+                </td>
+                <td className="py-2 px-4 text-sm text-gray-500 text-right">
+                  {(r.txCostApplied * 10000).toFixed(1)} bps
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SensitivityTable({
+  title,
+  description,
+  rows,
+}: {
+  title: string;
+  description: string;
+  rows: SensitivityVariant[];
+}) {
+  return (
+    <div>
+      <div className="mb-1.5">
+        <h4 className="text-sm font-medium text-gray-900">{title}</h4>
+        <p className="text-xs text-gray-500">{description}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50/60">
+              <th className="py-2 px-3 text-xs text-gray-400 text-left font-medium">参数</th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">CAGR</th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">Sharpe</th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">Max DD</th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">Alpha</th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">IR</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr
+                key={r.label}
+                className={`border-b border-gray-100 last:border-0 ${
+                  r.isBaseline ? "bg-blue-50/40" : ""
+                }`}
+              >
+                <td className="py-2 px-3 text-sm text-gray-900">
+                  <span className="inline-flex items-center gap-2">
+                    {r.label}
+                    {r.isBaseline && (
+                      <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 rounded px-1.5 py-0.5">
+                        基准
+                      </span>
+                    )}
+                  </span>
+                </td>
+                <td className="py-2 px-3 text-sm text-right text-gray-900 font-medium">
+                  {r.cagr.toFixed(2)}%
+                </td>
+                <td className="py-2 px-3 text-sm text-right text-gray-900">
+                  {r.sharpe.toFixed(2)}
+                </td>
+                <td className="py-2 px-3 text-sm text-right text-red-600">
+                  {r.maxDrawdown.toFixed(2)}%
+                </td>
+                <td
+                  className={`py-2 px-3 text-sm text-right ${r.alpha >= 0 ? "text-green-700" : "text-red-600"}`}
+                >
+                  {r.alpha >= 0 ? "+" : ""}
+                  {r.alpha.toFixed(2)}%
+                </td>
+                <td className="py-2 px-3 text-sm text-right text-gray-700">
+                  {r.informationRatio == null
+                    ? "—"
+                    : r.informationRatio.toFixed(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ParameterSensitivityCard({
+  data,
+}: {
+  data?: ParameterSensitivity | null;
+}) {
+  if (!data) return null;
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">参数敏感性</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          单一变量扫描：每张表只改一个参数，其余固定为基准（
+          {data.baseline.lookbackMonths}-{data.baseline.skipMonths} 动量·
+          {data.baseline.rebalanceMonths === 1 ? "月" : `${data.baseline.rebalanceMonths} 月`}
+          再平衡·Top {Math.round(data.baseline.topQuintilePct * 100)}%）
+        </p>
+      </div>
+      <div className="px-4 py-3 space-y-4">
+        <SensitivityTable
+          title="动量回看期"
+          description="跳过最近 1 个月以避开短期反转，比较 6/9/12 个月回看窗口"
+          rows={data.byLookback}
+        />
+        <div className="border-t border-gray-100 -mx-4" />
+        <SensitivityTable
+          title="再平衡频率"
+          description="月度 vs 季度再平衡（更高频率换手大、交易成本高）"
+          rows={data.byRebalance}
+        />
+        <div className="border-t border-gray-100 -mx-4" />
+        <SensitivityTable
+          title="分位桶宽度"
+          description="选 Top N% 因子最高股票等权（窄桶集中度高，宽桶更接近基准）"
+          rows={data.byQuintile}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function ResultPage() {
+  const router = useRouter();
   const params = useParams<{ id: string }>();
   const studyId = params.id;
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
@@ -657,17 +1134,41 @@ export default function ResultPage() {
             size="sm"
             variant="outline"
             className="border-gray-200 text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5"
+            onClick={() => {
+              if (!study || !result) return;
+              const md = generateResultMarkdown(
+                {
+                  id: study.id,
+                  title: study.title,
+                  hypothesis: study.hypothesis ?? "",
+                  universe: study.universe,
+                  startDate: study.startDate,
+                  endDate: study.endDate,
+                  rebalance: study.rebalance,
+                  benchmark: study.benchmark,
+                  txCostBps: study.txCostBps,
+                },
+                result,
+              );
+              const safeTitle = (study.title || "study")
+                .replace(/[^\p{L}\p{N}_-]+/gu, "_")
+                .slice(0, 60);
+              downloadMarkdown(`${safeTitle}-${study.id.slice(0, 8)}.md`, md);
+            }}
           >
             <Download className="h-3.5 w-3.5" />
-            导出 PDF
+            导出 Markdown
           </Button>
           <Button
             size="sm"
-            variant="outline"
-            className="border-gray-200 text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5"
+            className="bg-blue-600 hover:bg-blue-700 text-white inline-flex items-center gap-1.5"
+            onClick={() => {
+              if (!study) return;
+              router.push(`/studies/new?cloneFrom=${study.id}`);
+            }}
           >
-            <Share2 className="h-3.5 w-3.5" />
-            分享
+            <Copy className="h-3.5 w-3.5" />
+            复制并修改
           </Button>
         </div>
       </div>
@@ -693,6 +1194,11 @@ export default function ResultPage() {
 
       {activeTab === "overview" && (
         <>
+          {/* Phase 3.1: data-quality / bias panel always at the top of the
+              overview so users can't miss the survivorship and factor-type
+              caveats. */}
+          <DataQualityCard dq={result.dataQuality} />
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="space-y-5">
               <AIConclusionCard
@@ -723,26 +1229,7 @@ export default function ResultPage() {
             generating={generatingConclusion}
           />
 
-          {/* Next experiments */}
-          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900">下一步实验</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                基于 AI 分析，推荐以下后续研究方向
-              </p>
-            </div>
-            <div className="px-4 py-3 flex flex-wrap gap-2">
-              <Link href="/studies/new">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-blue-200 text-blue-600 hover:bg-blue-50"
-                >
-                  + 新研究变体
-                </Button>
-              </Link>
-            </div>
-          </div>
+          <BestWorstMonthsCard monthly={result.monthlyReturns} />
         </>
       )}
 
@@ -754,6 +1241,8 @@ export default function ResultPage() {
           <ChartCard title="年度收益（%）">
             <AnnualReturnsChart data={result.annualReturns} height={260} />
           </ChartCard>
+          <AnnualReturnsTable data={result.annualReturns} />
+          <BestWorstMonthsCard monthly={result.monthlyReturns} />
           <MetricsTable result={result} />
         </div>
       )}
@@ -770,6 +1259,8 @@ export default function ResultPage() {
       {activeTab === "analysis" && (
         <div className="space-y-5">
           <FactorDiagnostics data={result.factorDiagnostics} />
+          <ParameterSensitivityCard data={result.parameterSensitivity} />
+          <RebalanceHistoryCard history={result.rebalanceHistory} />
         </div>
       )}
 

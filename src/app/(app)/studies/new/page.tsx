@@ -1,9 +1,9 @@
 "use client";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Loader2 } from "lucide-react";
 
 const EXAMPLE_HYPOTHESIS =
   "美股大盘股中，综合质量因子（ROIC/ROE/毛利率）与价值因子（PE/PB/PS）的组合策略，在扣除交易成本后，10 年回测期内可超越 SPY 基准。";
@@ -15,8 +15,22 @@ const inputCls =
 
 const labelCls = "block text-xs font-medium text-gray-600 mb-1";
 
-export default function NewStudy() {
+interface SourceStudy {
+  id: string;
+  title: string;
+  hypothesis: string;
+  universe: string;
+  startDate: string;
+  endDate: string;
+  rebalance: string;
+  benchmark: string;
+  txCostBps: number;
+}
+
+function NewStudyForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const cloneFrom = searchParams.get("cloneFrom");
   const [hypothesis, setHypothesis] = useState("");
   const [universe, setUniverse] = useState("US Large Cap (Russell 1000)");
   const [startDate, setStartDate] = useState("2014-01-01");
@@ -30,6 +44,39 @@ export default function NewStudy() {
   const [longShort, setLongShort] = useState("仅做多");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [cloneStatus, setCloneStatus] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle");
+  const [cloneSource, setCloneSource] = useState<SourceStudy | null>(null);
+  const cloneAppliedRef = useRef(false);
+
+  // Phase 3.1 Copy & Modify: when ?cloneFrom=<id> is present, fetch the source
+  // study once and prefill the form. We don't auto-submit; the user reviews
+  // and tweaks before kicking off a new run.
+  useEffect(() => {
+    if (!cloneFrom || cloneAppliedRef.current) return;
+    cloneAppliedRef.current = true;
+    setCloneStatus("loading");
+    void (async () => {
+      try {
+        const res = await fetch(`/api/studies/${cloneFrom}`);
+        if (!res.ok) throw new Error(`无法加载源研究 (HTTP ${res.status})`);
+        const { study } = (await res.json()) as { study: SourceStudy };
+        setCloneSource(study);
+        setHypothesis(study.hypothesis ?? "");
+        setUniverse(study.universe ?? "US Large Cap (Russell 1000)");
+        setStartDate((study.startDate ?? "").slice(0, 10) || "2014-01-01");
+        setEndDate((study.endDate ?? "").slice(0, 10) || "2024-01-01");
+        setRebalance(study.rebalance ?? "季度");
+        setBenchmark(study.benchmark ?? "SPY");
+        setTxCost(String(study.txCostBps ?? 5));
+        setCloneStatus("loaded");
+      } catch (err) {
+        setCloneStatus("error");
+        setErrorMsg(err instanceof Error ? err.message : "加载源研究失败");
+      }
+    })();
+  }, [cloneFrom]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -71,6 +118,36 @@ export default function NewStudy() {
           描述您的投资假设，AI 将为您生成完整的研究计划
         </p>
       </div>
+
+      {cloneFrom && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-start gap-2">
+          <Copy className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            {cloneStatus === "loading" && (
+              <span className="inline-flex items-center gap-1.5 text-blue-700">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                正在加载源研究…
+              </span>
+            )}
+            {cloneStatus === "loaded" && cloneSource && (
+              <>
+                <div className="text-blue-900 font-medium">
+                  从已有研究复制：{cloneSource.title}
+                </div>
+                <div className="text-xs text-blue-700 mt-0.5">
+                  字段已预填，请按需修改后提交。源研究 ID:{" "}
+                  <span className="font-mono">{cloneSource.id}</span>
+                </div>
+              </>
+            )}
+            {cloneStatus === "error" && (
+              <span className="text-red-700">
+                加载源研究失败，下方为默认值。
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Hypothesis */}
@@ -272,5 +349,13 @@ export default function NewStudy() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function NewStudy() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">加载中…</div>}>
+      <NewStudyForm />
+    </Suspense>
   );
 }

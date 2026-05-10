@@ -4,17 +4,23 @@ export interface FactorScores {
   [ticker: string]: Map<MonthKey, number>;
 }
 
-// 12-1 momentum: at end of month M, factor = price[M-1] / price[M-12] - 1.
-// Skipping the most recent month is the classic Jegadeesh-Titman convention
-// to avoid the short-term reversal effect.
-export function compute121Momentum(prices: MonthlyPrices): FactorScores {
+// Generalized momentum: at end of month M,
+//   factor = price[M-skipMonths] / price[M-lookbackMonths] - 1.
+// Skipping the most recent month(s) follows Jegadeesh-Titman to avoid the
+// short-term reversal effect. The classic 12-1 momentum is
+// computeMomentum(prices, 12, 1).
+export function computeMomentum(
+  prices: MonthlyPrices,
+  lookbackMonths: number,
+  skipMonths: number = 1,
+): FactorScores {
   const out: FactorScores = {};
   for (const ticker of Object.keys(prices)) {
     const series = prices[ticker];
     const scores = new Map<MonthKey, number>();
     for (const month of series.keys()) {
-      const skipKey = priorMonth(month, 1); // M-1
-      const baseKey = priorMonth(month, 12); // M-12
+      const skipKey = priorMonth(month, skipMonths);
+      const baseKey = priorMonth(month, lookbackMonths);
       const skipPrice = series.get(skipKey);
       const basePrice = series.get(baseKey);
       if (
@@ -31,6 +37,11 @@ export function compute121Momentum(prices: MonthlyPrices): FactorScores {
     out[ticker] = scores;
   }
   return out;
+}
+
+// 12-1 momentum: kept as a thin wrapper for the canonical baseline.
+export function compute121Momentum(prices: MonthlyPrices): FactorScores {
+  return computeMomentum(prices, 12, 1);
 }
 
 // Helper: rank tickers by factor at a given month, returning the sorted list

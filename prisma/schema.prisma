@@ -129,6 +129,11 @@ model StudyResult {
   annualReturns     Json
   factorDiagnostics Json
   aiExplanation     Json
+  // Phase 3.1 additions — all default to empty so old rows continue to work.
+  monthlyReturns       Json @default("[]")
+  rebalanceHistory     Json @default("[]")
+  dataQuality          Json @default("{}")
+  parameterSensitivity Json?
   createdAt         DateTime @default(now())
 }
 

@@ -1,9 +1,10 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { UNIVERSE, DEFAULT_BENCHMARK, rebalanceMonthsOf } from "./universe";
 import { fetchMonthlyPrices } from "./prices";
-import { compute121Momentum } from "./factor";
+import { compute121Momentum, computeMomentum } from "./factor";
 import { runBacktest as runEngine } from "./engine";
+import type { MonthKey } from "./prices";
 import {
   computeAnnualReturns,
   computeDrawdownSeries,
@@ -22,6 +23,10 @@ export const BACKTEST_STEPS: { name: string; description: string }[] = [
   { name: "构建投资组合", description: "按再平衡频率选 top 20% 等权" },
   { name: "运行回测引擎", description: "月度模拟，应用单边交易成本" },
   { name: "计算风险指标", description: "CAGR、Sharpe、Max DD、Beta、Alpha、IR" },
+  {
+    name: "敏感性扫描",
+    description: "扫描动量回看期、再平衡频率和分位桶宽度",
+  },
   { name: "汇总研究结果", description: "保存到数据库，AI 报告由结果页按需生成" },
 ];
 
@@ -184,6 +189,160 @@ function validateStudyInput(study: {
       `回测区间过短（仅 ${months} 个月），至少需要 18 个月以保证因子预热`,
     );
   }
+}
+
+// ====================================================================
+// Phase 3.1: parameter sensitivity sweep.
+//
+// Runs a small grid of single-axis variations holding the other parameters at
+// the user's chosen baseline. Re-uses already-fetched prices, so each variant
+// costs a couple ms — only the engine's monthly loop runs.
+//
+// Three axes:
+//   • lookback: 6-1, 9-1, 12-1 momentum
+//   • rebalance frequency: monthly (1) vs quarterly (3)
+//   • top quintile bucket width: 10%, 20%, 30%
+// ====================================================================
+
+interface SensitivityVariant {
+  label: string;
+  cagr: number;
+  sharpe: number;
+  maxDrawdown: number;
+  alpha: number;
+  informationRatio: number | null;
+  isBaseline: boolean;
+}
+
+interface ParameterSensitivity {
+  baseline: {
+    lookbackMonths: number;
+    skipMonths: number;
+    rebalanceMonths: number;
+    topQuintilePct: number;
+  };
+  byLookback: SensitivityVariant[];
+  byRebalance: SensitivityVariant[];
+  byQuintile: SensitivityVariant[];
+  generatedAt: string;
+}
+
+interface SensitivityRunInput {
+  prices: Record<string, Map<MonthKey, number>>;
+  benchmark: Map<MonthKey, number>;
+  startDate: Date;
+  endDate: Date;
+  txCostBps: number;
+  baselineLookback: number;
+  baselineSkip: number;
+  baselineRebalanceMonths: number;
+  baselineTopQuintilePct: number;
+}
+
+function metricsForVariant(
+  args: SensitivityRunInput,
+  override: Partial<{
+    lookbackMonths: number;
+    skipMonths: number;
+    rebalanceMonths: number;
+    topQuintilePct: number;
+  }>,
+): Omit<SensitivityVariant, "label" | "isBaseline"> {
+  const lookback = override.lookbackMonths ?? args.baselineLookback;
+  const skip = override.skipMonths ?? args.baselineSkip;
+  const rebalanceMonths = override.rebalanceMonths ?? args.baselineRebalanceMonths;
+  const topQuintilePct = override.topQuintilePct ?? args.baselineTopQuintilePct;
+
+  const scores = computeMomentum(args.prices, lookback, skip);
+  const path = runEngine({
+    prices: args.prices,
+    benchmark: args.benchmark,
+    scores,
+    startDate: args.startDate,
+    endDate: args.endDate,
+    rebalanceMonths,
+    txCostBps: args.txCostBps,
+    topQuintilePct,
+  });
+
+  if (path.equity.length < 2) {
+    return {
+      cagr: 0,
+      sharpe: 0,
+      maxDrawdown: 0,
+      alpha: 0,
+      informationRatio: null,
+    };
+  }
+
+  // computeResultMetrics is loaded statically at the top of the file via the
+  // metrics import — re-importing dynamically would be wasteful.
+  const m = computeResultMetrics(path);
+  return {
+    cagr: m.strategy.cagr,
+    sharpe: m.strategy.sharpe,
+    maxDrawdown: m.strategy.maxDrawdown,
+    alpha: m.strategy.alpha,
+    informationRatio: m.strategy.informationRatio,
+  };
+}
+
+function runSensitivitySweep(
+  args: SensitivityRunInput,
+): ParameterSensitivity {
+  const lookbackVariants = [
+    { lookback: 6, label: "6-1 动量" },
+    { lookback: 9, label: "9-1 动量" },
+    { lookback: 12, label: "12-1 动量" },
+  ];
+  const byLookback: SensitivityVariant[] = lookbackVariants.map((v) => {
+    const m = metricsForVariant(args, { lookbackMonths: v.lookback, skipMonths: 1 });
+    return {
+      label: v.label,
+      ...m,
+      isBaseline: v.lookback === args.baselineLookback && args.baselineSkip === 1,
+    };
+  });
+
+  const rebalVariants = [
+    { months: 1, label: "月度再平衡" },
+    { months: 3, label: "季度再平衡" },
+  ];
+  const byRebalance: SensitivityVariant[] = rebalVariants.map((v) => {
+    const m = metricsForVariant(args, { rebalanceMonths: v.months });
+    return {
+      label: v.label,
+      ...m,
+      isBaseline: v.months === args.baselineRebalanceMonths,
+    };
+  });
+
+  const quintileVariants = [
+    { pct: 0.1, label: "Top 10%" },
+    { pct: 0.2, label: "Top 20%" },
+    { pct: 0.3, label: "Top 30%" },
+  ];
+  const byQuintile: SensitivityVariant[] = quintileVariants.map((v) => {
+    const m = metricsForVariant(args, { topQuintilePct: v.pct });
+    return {
+      label: v.label,
+      ...m,
+      isBaseline: Math.abs(v.pct - args.baselineTopQuintilePct) < 1e-6,
+    };
+  });
+
+  return {
+    baseline: {
+      lookbackMonths: args.baselineLookback,
+      skipMonths: args.baselineSkip,
+      rebalanceMonths: args.baselineRebalanceMonths,
+      topQuintilePct: args.baselineTopQuintilePct,
+    },
+    byLookback,
+    byRebalance,
+    byQuintile,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 // Public entry point. Fire-and-forget from /start. Never throws — failures are
@@ -361,10 +520,100 @@ export async function runBacktest(studyId: string): Promise<void> {
       Math.round((Date.now() - t7) / 1000),
     );
 
-    // -------- Step 8: persist result --------
+    // -------- Step 8: parameter sensitivity sweep --------
+    await assertNotCancelled(studyId);
+    const tSens = Date.now();
+    await setStep(
+      studyId,
+      7,
+      "running",
+      "敏感性扫描：动量回看期、再平衡频率、分位桶宽度",
+    );
+    let parameterSensitivity: ParameterSensitivity | null = null;
+    try {
+      parameterSensitivity = runSensitivitySweep({
+        prices,
+        benchmark,
+        startDate: study.startDate,
+        endDate: study.endDate,
+        txCostBps: study.txCostBps,
+        baselineLookback: 12,
+        baselineSkip: 1,
+        baselineRebalanceMonths: rebalanceMonthsOf(study.rebalance),
+        baselineTopQuintilePct: 0.2,
+      });
+      await setStep(
+        studyId,
+        7,
+        "complete",
+        `敏感性扫描完成（${parameterSensitivity.byLookback.length + parameterSensitivity.byRebalance.length + parameterSensitivity.byQuintile.length} 次试算）`,
+        undefined,
+        Math.round((Date.now() - tSens) / 1000),
+      );
+    } catch (sensErr) {
+      // Sensitivity is a nice-to-have — don't fail the whole study if a single
+      // variant blows up. Log a warning and continue with parameterSensitivity
+      // null; the result page handles that case gracefully.
+      console.warn("[backtest] sensitivity sweep failed:", sensErr);
+      await appendLog(
+        studyId,
+        `敏感性扫描跳过：${sensErr instanceof Error ? sensErr.message : "未知错误"}`,
+        "warning",
+      );
+      await setStep(
+        studyId,
+        7,
+        "complete",
+        "敏感性扫描跳过",
+        "已记录警告",
+        Math.round((Date.now() - tSens) / 1000),
+      );
+    }
+
+    // -------- Step 9: persist result --------
     await assertNotCancelled(studyId);
     const t8 = Date.now();
-    await setStep(studyId, 7, "running", "保存研究结果到数据库");
+    await setStep(studyId, 8, "running", "保存研究结果到数据库");
+
+    // Phase 3.1: emit monthly returns, rebalance history, and data-quality
+    // metadata so the Result page can render Best/Worst Months, the rebalance
+    // table, and the survivorship-bias panel without re-deriving everything.
+    const monthlyReturns = path.returns.map((r) => ({
+      date: r.date,
+      strategy: r.strategy,
+      benchmark: r.benchmark,
+      active: r.active,
+    }));
+    const rebalanceHistory = path.rebalances.map((r) => ({
+      date: r.date,
+      holdings: r.holdings,
+      turnover: r.turnover,
+      txCostApplied: r.txCostApplied,
+    }));
+    const missingTickers = Object.entries(prices)
+      .filter(([, m]) => m.size === 0)
+      .map(([t]) => t);
+    const dataQuality = {
+      universeSize: UNIVERSE.length,
+      universeNote: "当前股票池为静态 30 只美股大市值列表（硬编码），不是历史完整 S&P 500 成分股",
+      survivorshipBias: true,
+      survivorshipNote:
+        "因为股票池在整个回测窗口里固定，已退市/被剔除指数的标的不在样本里，回测结果存在幸存者偏差",
+      factorType: "Price-only momentum",
+      factorTypeNote: "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子",
+      priceCoverage: {
+        totalDataPoints: totalPoints,
+        missingTickers,
+        coveragePct: Math.round(
+          (totalPoints / (UNIVERSE.length * Math.max(1, benchmark.size))) * 100,
+        ),
+      },
+      benchmarkTicker: benchTicker,
+      backtestMonths: path.equity.length - 1,
+      rebalanceCount: path.rebalances.length,
+      advisoryDisclaimer: "本研究结果仅供研究和教育用途，不构成投资建议",
+    };
+
     const payload = {
       conclusion: "", // intentionally empty — Result page triggers AI gen
       metrics: metrics as unknown as Prisma.InputJsonValue,
@@ -373,6 +622,15 @@ export async function runBacktest(studyId: string): Promise<void> {
       annualReturns: annualReturns as unknown as Prisma.InputJsonValue,
       factorDiagnostics: factorDiagnostics as unknown as Prisma.InputJsonValue,
       aiExplanation: [] as unknown as Prisma.InputJsonValue,
+      monthlyReturns: monthlyReturns as unknown as Prisma.InputJsonValue,
+      rebalanceHistory: rebalanceHistory as unknown as Prisma.InputJsonValue,
+      dataQuality: dataQuality as unknown as Prisma.InputJsonValue,
+      // parameterSensitivity is Json? — store DbNull when the sweep failed so
+      // the column is SQL NULL rather than the JSON literal `null`.
+      parameterSensitivity:
+        parameterSensitivity === null
+          ? Prisma.DbNull
+          : (parameterSensitivity as unknown as Prisma.InputJsonValue),
     };
     await prisma.studyResult.upsert({
       where: { studyId },
@@ -385,7 +643,7 @@ export async function runBacktest(studyId: string): Promise<void> {
     });
     await setStep(
       studyId,
-      7,
+      8,
       "complete",
       "研究结果已保存，AI 解读将在结果页加载时按需生成",
       undefined,
