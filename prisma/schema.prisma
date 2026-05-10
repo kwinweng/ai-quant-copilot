@@ -23,6 +23,8 @@ model User {
   accounts      Account[]
   sessions      Session[]
   studies       Study[]
+  // Phase 10 — paper trading portfolios derived from completed studies.
+  paperPortfolios PaperPortfolio[]
   createdAt     DateTime  @default(now())
 }
 
@@ -207,6 +209,46 @@ model FundamentalSnapshot {
   @@id([ticker, source, fiscalDate])
   @@index([ticker, asOf])
   @@index([source, asOf])
+}
+
+// ============================================================
+// Phase 10 — Paper trading
+// ============================================================
+//
+// A PaperPortfolio is a snapshot of a completed study's last-rebalance
+// holdings plus equal-weight starting value of $100k. We track the
+// portfolio's value over time by re-pricing the holdings against Yahoo's
+// latest monthly closes when the user opens the page. There's no
+// scheduled refresh / email alerts in this phase; users pull data when
+// they look. Future phases can layer on cron + notifications.
+model PaperPortfolio {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Source study + the rebalance event used to seed the portfolio.
+  sourceStudyId   String
+  sourceRebalanceDate String  // YYYY-MM, the rebalance picked (usually latest)
+  // Display
+  title           String
+  // Holdings as { ticker: weight } where weights sum to 1. Equal-weighted
+  // by default but the JSON shape allows future drift / overrides.
+  holdings        Json
+  // Initial portfolio value (USD). Default $100k for round-number tracking.
+  initialValue    Float    @default(100000)
+  // Benchmark to compare against (default copies the source study).
+  benchmark       String   @default("SPY")
+  // The "start" anchor — usually the rebalance date so the curve starts at
+  // initialValue. Used by the refresh logic to compute share counts.
+  startedAt       DateTime @default(now())
+  // Optional: archived hides it from the default list view.
+  archived        Boolean  @default(false)
+  notes           String?  @db.Text
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, archived])
+  @@index([sourceStudyId])
 }
 
 // Per-user per-day AI call counters for cheap rate limiting. We don't need a

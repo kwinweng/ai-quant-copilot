@@ -1716,6 +1716,35 @@ export default function ResultPage() {
           </Button>
           <Button
             size="sm"
+            variant="outline"
+            className="inline-flex items-center gap-1.5"
+            onClick={async () => {
+              if (!study) return;
+              try {
+                const res = await fetch("/api/paper", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ studyId: study.id }),
+                });
+                if (!res.ok) {
+                  const body = await res.json().catch(() => ({}));
+                  alert(body?.error ?? `创建失败 (HTTP ${res.status})`);
+                  return;
+                }
+                const { portfolio } = (await res.json()) as {
+                  portfolio: { id: string };
+                };
+                router.push(`/paper?id=${portfolio.id}`);
+              } catch (err) {
+                alert(err instanceof Error ? err.message : "创建失败");
+              }
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            转 Paper 组合
+          </Button>
+          <Button
+            size="sm"
             className="bg-blue-600 hover:bg-blue-700 text-white inline-flex items-center gap-1.5"
             onClick={() => {
               if (!study) return;

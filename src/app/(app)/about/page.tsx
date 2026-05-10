@@ -40,6 +40,27 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Phase 10 · Paper Trading",
+    date: "2026-05-11",
+    title: "完成研究 → 一键转纸面持仓 → 持续追踪实际表现",
+    summary:
+      "在结果页加「转 Paper 组合」按钮，从研究的最末次再平衡持仓建一个等权 buy-and-hold 模拟组合。新页面 /paper 拉 Yahoo 最新月度价实时估值，对比基准（默认 SPY）。从「回测就完了」变成「持续观察」的工作流闭环。",
+    highlights: [
+      "新表 PaperPortfolio：sourceStudyId / sourceRebalanceDate / holdings JSON / initialValue / benchmark / archived / notes",
+      "POST /api/paper：从已完成研究的最末次再平衡建仓（必须已 COMPLETED + 有 rebalanceHistory）",
+      "GET /api/paper：列表（轻量，不重新拉价）",
+      "GET /api/paper/[id]/value：拉 Yahoo 最新价实时估值（含基准对比）",
+      "DELETE /api/paper/[id]/value：归档（软删除）",
+      "src/lib/paper/valuation.ts：valuatePortfolio + equalWeight 纯函数",
+      "新页 /paper：列表 + 实时估值卡片 + 跑赢/落后基准徽章",
+      "结果页加「转 Paper 组合」按钮（优先级低于「复制并修改」）",
+      "侧边栏加 Paper 入口（Briefcase 图标）",
+      "+10 个测试（valuation 10 个：等权计算、收益率、不可用 ticker、退化输入）",
+      "限制：当前 buy-and-hold 不调仓；无邮件/Telegram 提醒；用户要主动来看",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
     version: "Phase 9 · 多基准归因",
     date: "2026-05-11",
     title: "对 SPY/QQQ/IWM/MTUM/IUSV 跑 OLS，看 alpha 是不是因子伪装",

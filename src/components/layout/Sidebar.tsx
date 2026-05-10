@@ -8,6 +8,7 @@ import {
   Plus,
   Sparkles,
   GitCompare,
+  Briefcase,
   Database,
   Info,
   LogOut,
@@ -18,6 +19,7 @@ const navItems = [
   { href: "/studies/coach", label: "AI 教练", icon: Sparkles, exact: false },
   { href: "/studies/new", label: "新研究", icon: Plus, exact: true },
   { href: "/studies/compare", label: "对比", icon: GitCompare, exact: false },
+  { href: "/paper", label: "Paper", icon: Briefcase, exact: false },
   { href: "/data-sources", label: "数据源", icon: Database, exact: false },
   { href: "/about", label: "关于", icon: Info, exact: false },
 ];
