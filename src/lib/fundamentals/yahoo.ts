@@ -152,13 +152,18 @@ export class YahooFundamentalsProvider implements FundamentalsProvider {
       // factor scoring code treats undefined as missing.
       roic: undefined,
       grossMargin: pct(unwrap(fd?.grossMargins)),
-      debtToEquity: num(
-        // financialData.debtToEquity is an absolute %, e.g. 192 means 1.92.
-        // Normalize to a ratio (192 → 1.92) for consistency with SEC.
-        unwrap(fd?.debtToEquity) != null
-          ? (unwrap(fd?.debtToEquity) as number) / 100
-          : undefined,
-      ),
+      // Sprint #5 H2: heuristic unit detection. yahoo-finance2 historically
+      // returned D/E as a percentage (192 = 1.92), but newer SDK versions
+      // sometimes return a normalized ratio (1.92 directly). Without checking
+      // we'd silently divide a real ratio of 1.92 by 100 → 0.0192, off by
+      // 100×. Real-world D/E values almost never exceed 5 for non-bank
+      // mega-caps; >5 is a strong signal the value is in pct form.
+      debtToEquity: (() => {
+        const raw = unwrap(fd?.debtToEquity);
+        if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+        const normalized = Math.abs(raw) > 5 ? raw / 100 : raw;
+        return num(normalized);
+      })(),
       revenueGrowth: pct(unwrap(fd?.revenueGrowth)),
       epsGrowth: pct(unwrap(fd?.earningsGrowth)),
       raw: { defaultKeyStatistics: dks, summaryDetail: sd, financialData: fd },

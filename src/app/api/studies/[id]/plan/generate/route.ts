@@ -12,6 +12,7 @@ import {
   assertUsageQuota,
   incrementUsage,
   describeAiError,
+  isBillableError,
 } from "@/lib/ai";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -88,6 +89,21 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
         controller.enqueue(
           encoder.encode(sseFrame({ type: "error", message })),
         );
+        // Sprint #5 H5: also send a terminal done frame so EventSource clients
+        // know to close their loading state instead of hanging on "generating".
+        controller.enqueue(
+          encoder.encode(sseFrame({ type: "done", failed: true })),
+        );
+        // Sprint #5 H6: charge for transient failures (429 / 5xx) since the
+        // upstream likely already burned compute. Skip billing for permanent
+        // / config errors (401-404 etc).
+        if (isBillableError(err)) {
+          try {
+            await incrementUsage(session!.user.id, "plan");
+          } catch (billErr) {
+            console.warn("[plan] retry-billing increment failed:", billErr);
+          }
+        }
       } finally {
         controller.close();
       }

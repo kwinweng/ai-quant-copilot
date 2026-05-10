@@ -10,6 +10,7 @@ import {
   assertUsageQuota,
   incrementUsage,
   describeAiError,
+  isBillableError,
 } from "@/lib/ai";
 
 // One coach turn = one SSE round trip. The client owns the conversation
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder();
   let succeeded = false;
+  let failureBillable = false;
   const stream = new ReadableStream({
     async start(controller) {
       try {
@@ -78,6 +80,7 @@ export async function POST(req: NextRequest) {
         succeeded = true;
       } catch (err) {
         console.error("[coach] streamCoachTurn failed:", err);
+        failureBillable = isBillableError(err);
         controller.enqueue(
           encoder.encode(
             sseFrame({ type: "error", message: describeAiError(err) }),
@@ -87,9 +90,8 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(sseFrame({ type: "done", failed: true })));
       } finally {
         controller.close();
-        if (succeeded) {
-          // Increment after successful completion only — failed calls don't
-          // burn the quota, matching plan/conclusion semantics.
+        // Sprint #5 H6: charge on success OR on transient (billable) failure.
+        if (succeeded || failureBillable) {
           try {
             await incrementUsage(session!.user.id, "coach");
           } catch (err) {

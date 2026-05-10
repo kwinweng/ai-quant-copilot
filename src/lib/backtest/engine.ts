@@ -102,18 +102,19 @@ export function runBacktest(input: BacktestInput): BacktestPath {
   } = input;
 
   const fullAxis = buildMonthAxis(startDate, endDate);
-
-  // Trim to months where we actually have a factor for some ticker. Factors
-  // need 12 months of history, so the first usable signal lands at startDate
-  // only if prices were padded with at least 13 months of pre-roll (handled
-  // upstream by fetchMonthlyPrices.lookbackMonths).
   const tickers = Object.keys(scores);
-  const usableMonths = fullAxis.filter((m) =>
-    tickers.some((t) => scores[t].has(m)),
-  );
 
-  // We need at least one decision month + one performance month.
-  if (usableMonths.length < 2) {
+  // Sprint #5 H3: drive the loop off the FULL month axis (not the filtered
+  // usableMonths), starting from the first month any ticker has a score.
+  // This guarantees every adjacent (decisionMonth, performanceMonth) pair is
+  // exactly 1 calendar month apart — even if some intermediate month happens
+  // to have zero scores anywhere in the universe (rare for our 30 mega-caps,
+  // but possible with extended universes or pre-2008 backtest windows).
+  // Months where no ticker has a score: skip rebalance, hold existing weights.
+  const hasAnyScore = (month: MonthKey) =>
+    tickers.some((t) => scores[t].has(month));
+  const firstUsableIdx = fullAxis.findIndex(hasAnyScore);
+  if (firstUsableIdx === -1 || firstUsableIdx >= fullAxis.length - 1) {
     return {
       axis: [],
       equity: [],
@@ -122,6 +123,7 @@ export function runBacktest(input: BacktestInput): BacktestPath {
       holdingsByMonth: {},
     };
   }
+  const axisMonths = fullAxis.slice(firstUsableIdx);
 
   const equity: MonthlyEquityPoint[] = [];
   const returns: MonthlyReturnPoint[] = [];
@@ -129,7 +131,7 @@ export function runBacktest(input: BacktestInput): BacktestPath {
   const holdingsByMonth: Record<MonthKey, string[]> = {};
 
   // Initial value 100 on the first usable month (pre-trade).
-  const firstMonth = usableMonths[0];
+  const firstMonth = axisMonths[0];
   let strategyValue = 100;
   let benchmarkValue = 100;
   equity.push({ date: firstMonth, strategy: 100, benchmark: 100 });
@@ -141,10 +143,17 @@ export function runBacktest(input: BacktestInput): BacktestPath {
   const universeSize = tickers.length;
   const topN = Math.max(1, Math.round(universeSize * topQuintilePct));
 
-  for (let i = 0; i < usableMonths.length - 1; i++) {
-    const decisionMonth = usableMonths[i];
-    const performanceMonth = usableMonths[i + 1];
-    const isRebalance = i === 0 || monthsSinceRebalance >= rebalanceMonths;
+  for (let i = 0; i < axisMonths.length - 1; i++) {
+    const decisionMonth = axisMonths[i];
+    const performanceMonth = axisMonths[i + 1];
+    // If this decision month has no scores anywhere, hold previous weights;
+    // skip the rebalance attempt but still compute the held-portfolio's
+    // performance for performanceMonth so the equity series stays in sync
+    // with the calendar month axis.
+    const decisionHasScores = hasAnyScore(decisionMonth);
+    const isRebalance =
+      decisionHasScores &&
+      (i === 0 || monthsSinceRebalance >= rebalanceMonths);
 
     if (isRebalance) {
       const ranked = rankByFactor(scores, decisionMonth);
@@ -220,7 +229,7 @@ export function runBacktest(input: BacktestInput): BacktestPath {
   }
 
   return {
-    axis: usableMonths,
+    axis: axisMonths,
     equity,
     returns,
     rebalances,

@@ -40,6 +40,21 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Sprint #5 · 剩余健壮性兜底",
+    date: "2026-05-10",
+    title: "Yahoo D/E 单位、SEC 债务概念、SSE done 帧、AI quota retry 计费",
+    summary:
+      "代码评审里剩余的 5 项 HIGH 全部清掉：Yahoo 数据单位启发式、SEC 债务标签去重、流式接口失败时的 done 帧补齐、AI quota 在 retry-friendly 错误下扣费。",
+    highlights: [
+      "H2 — Yahoo debtToEquity 启发式：>5 视为 pct 形式 / 100，否则信任 SDK",
+      "H3 — engine 改用 fullAxis 驱动，跳月也保持 1 月间距，CAGR 不再因跳月误算月数",
+      "H4 — SEC 债务概念去重：LongTermDebtNoncurrent + ShortTermBorrowings/DebtCurrent，不再重复入账长债流动部分",
+      "H5 — Plan SSE 错误时也发 done 帧，前端 loading 不再卡死",
+      "H6 — 新增 isBillableError：429/5xx 等可能消耗 DeepSeek 算力的错误也扣 quota，401-404 配置错误仍不扣，防滥用",
+    ],
+    badge: { label: "fix", tone: "fix" },
+  },
+  {
     version: "Sprint #4 · 结果页重构 + 移动适配",
     date: "2026-05-10",
     title: "tab 重构、移动图表、PIT 进度、retry 文案、色盲适配",

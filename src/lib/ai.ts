@@ -75,6 +75,37 @@ export function describeAiError(err: unknown): string {
   return "AI 调用失败";
 }
 
+// Sprint #5 H6: classify an error as "user-billable" or not for quota
+// purposes. Transient failures (rate limits, server errors, timeouts) DO
+// count against the user's daily quota — DeepSeek likely already started
+// generating, so it's compute we paid for and we don't want users in a
+// rapid retry loop to drain the budget. Permanent / config errors (401,
+// 402, 403, 404, missing API key) are never billable — they're not the
+// user's fault.
+export function isBillableError(err: unknown): boolean {
+  if (err instanceof OpenAI.APIConnectionError) return false; // never reached server
+  if (err instanceof OpenAI.APIError) {
+    const status = err.status;
+    if (
+      status === 401 ||
+      status === 402 ||
+      status === 403 ||
+      status === 404 ||
+      status === 400 ||
+      status === 422
+    ) {
+      return false;
+    }
+    // 429 + 500-class: server saw the request, possibly partially executed it.
+    return true;
+  }
+  if (err instanceof Error && err.message.includes("DEEPSEEK_API_KEY")) {
+    return false;
+  }
+  // Unknown error class: be generous, don't bill.
+  return false;
+}
+
 // ============================================================
 // Per-user per-day quota — cheap protection against runaway costs.
 // ============================================================

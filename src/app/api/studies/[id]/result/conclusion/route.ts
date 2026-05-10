@@ -12,6 +12,7 @@ import {
   assertUsageQuota,
   incrementUsage,
   describeAiError,
+  isBillableError,
 } from "@/lib/ai";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -87,6 +88,15 @@ export async function POST(_req: Request, ctx: Ctx) {
     return NextResponse.json({ result: updated });
   } catch (err) {
     console.error("POST /api/studies/[id]/result/conclusion failed", err);
+    // Sprint #5 H6: charge for transient failures so reluctance to retry
+    // serves as a budget guardrail — config errors stay free.
+    if (isBillableError(err)) {
+      try {
+        await incrementUsage(session!.user.id, "conclusion");
+      } catch (billErr) {
+        console.warn("[conclusion] retry-billing increment failed:", billErr);
+      }
+    }
     return serverError(describeAiError(err));
   }
 }

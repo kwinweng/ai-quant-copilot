@@ -178,16 +178,19 @@ export class SecEdgarProvider implements FundamentalsProvider {
         "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
       ),
     );
+    // Sprint #5 H4: prefer LongTermDebtNoncurrent so we don't double-count
+    // the current portion of long-term debt. If it's not tagged, the broader
+    // LongTermDebt concept usually already excludes the current portion.
     const longTermDebt = latestAnnual(
-      getConcept(facts, "LongTermDebt", "LongTermDebtNoncurrent"),
+      getConcept(facts, "LongTermDebtNoncurrent", "LongTermDebt"),
     );
+    // Short-term debt: only use concepts that don't overlap with longTermDebt.
+    // ShortTermBorrowings is the canonical "real short-term" tag. DebtCurrent
+    // captures the current portion of all debt (often equivalent on the BS).
+    // LongTermDebtCurrent (= long-term debt due in 12 months) was previously
+    // mixed in but conflicts with our long-term concept choice — drop it.
     const shortTermDebt = latestAnnual(
-      getConcept(
-        facts,
-        "ShortTermBorrowings",
-        "LongTermDebtCurrent",
-        "DebtCurrent",
-      ),
+      getConcept(facts, "ShortTermBorrowings", "DebtCurrent"),
     );
     const epsBasic = latestAnnual(
       getConcept(facts, "EarningsPerShareBasic", "EarningsPerShareDiluted"),
@@ -373,16 +376,14 @@ export class SecEdgarProvider implements FundamentalsProvider {
         "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
       ),
     );
+    // Sprint #5 H4: same de-duped long/short debt concept choice as the
+    // single-snapshot path above — keeps historical PIT ROIC consistent with
+    // the current snapshot.
     const longTermDebt = annualsOf(
-      getConcept(facts, "LongTermDebt", "LongTermDebtNoncurrent"),
+      getConcept(facts, "LongTermDebtNoncurrent", "LongTermDebt"),
     );
     const shortTermDebt = annualsOf(
-      getConcept(
-        facts,
-        "ShortTermBorrowings",
-        "LongTermDebtCurrent",
-        "DebtCurrent",
-      ),
+      getConcept(facts, "ShortTermBorrowings", "DebtCurrent"),
     );
     const epsAnnual = annualsOf(
       getConcept(facts, "EarningsPerShareBasic", "EarningsPerShareDiluted"),
