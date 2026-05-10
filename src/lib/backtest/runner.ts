@@ -447,6 +447,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         txCostBps: true,
         universe: true,
         factorMix: true,
+        costModel: true,
       },
     });
     if (!study) {
@@ -652,6 +653,9 @@ export async function runBacktest(studyId: string): Promise<void> {
     await assertNotCancelled(studyId);
     const t5 = Date.now();
     await setStep(studyId, stepIdx(4), "running", "按再平衡频率构建投资组合");
+    // Phase 7: pass costMode so engine applies tiered model when configured.
+    const costMode =
+      study.costModel === "tiered" ? "tiered" : "simple";
     const path = runEngine({
       prices,
       benchmark,
@@ -660,6 +664,7 @@ export async function runBacktest(studyId: string): Promise<void> {
       endDate: study.endDate,
       rebalanceMonths: rebalanceMonthsOf(study.rebalance),
       txCostBps: study.txCostBps,
+      costMode,
     });
     if (path.equity.length < 2) {
       throw new Error(
@@ -850,6 +855,12 @@ export async function runBacktest(studyId: string): Promise<void> {
       benchmarkTicker: benchTicker,
       backtestMonths: path.equity.length - 1,
       rebalanceCount: path.rebalances.length,
+      // Phase 7: cost model disclosure
+      costModel: study.costModel,
+      costModelNote:
+        study.costModel === "tiered"
+          ? `分层交易成本模型：mega-cap 1 bps、large-cap 4 bps、mid-cap 10 bps 基础点差 + sqrt(turnover) × 5 bps 市场冲击 + 用户填的 ${study.txCostBps} bps 佣金。比单一 ${study.txCostBps} bps 更接近实盘。`
+          : `单一 ${study.txCostBps} bps 模型：所有标的、所有规模一致。新研究默认走「分层」模型，老研究保持兼容。`,
       advisoryDisclaimer: "本研究结果仅供研究和教育用途，不构成投资建议",
     };
 

@@ -40,6 +40,22 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Phase 7 · 真实交易成本模型",
+    date: "2026-05-11",
+    title: "分层流动性 + 平方根市场冲击，新研究默认实盘可信",
+    summary:
+      "替换原单一 bps 模型为：mega-cap 1 bps、large-cap 4 bps、mid-cap 10 bps 基础点差 + sqrt(turnover) × 5 bps 市场冲击 + 用户填的 bps 佣金。新研究默认走 tiered 模型，老研究保持 simple 兼容。",
+    highlights: [
+      "新模块 src/lib/backtest/costModel.ts：60 标的按 mega/large/mid 分层（top 10 / 中间 30 / 末 20）",
+      "tieredCost：avg(spread by tier) + sqrt(turnover) × 5 bps + userCommission",
+      "BacktestInput 加 costMode 参数；engine 改用 costFn 接口（simple 保持 100% 老行为）",
+      "Study.costModel 字段（默认 simple 保兼容；新研究通过 form 提交 tiered）",
+      "DataQualityCard 增加 costModel 披露：明确告诉用户哪条计算路径",
+      "+13 个测试（costModel 13 个：tier 分类、ratio 公式、size 超线性、混合 portfolio）",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
     version: "Phase 6 · 股票池 30→60 + UniverseProvider 抽象",
     date: "2026-05-11",
     title: "样本数翻倍 + 8 板块覆盖 + 加入「淡出大市值」反幸存者样本",

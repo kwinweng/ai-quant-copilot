@@ -142,6 +142,9 @@ function NewStudyForm() {
           benchmark,
           txCostBps: Number(txCost) || 0,
           factorMix,
+          // Phase 7: new studies default to the realistic tiered cost model.
+          // Server still accepts "simple" for parity with old API behavior.
+          costModel: "tiered",
         }),
       });
       if (!res.ok) {

@@ -1,5 +1,10 @@
 import { MonthKey, MonthlyPrices, buildMonthAxis } from "./prices";
 import { FactorScores, rankByFactor } from "./factor";
+import {
+  costFunctionForMode,
+  type CostFunction,
+  type CostMode,
+} from "./costModel";
 
 export interface BacktestInput {
   prices: MonthlyPrices;
@@ -10,6 +15,11 @@ export interface BacktestInput {
   rebalanceMonths: number; // 1 = monthly, 3 = quarterly
   txCostBps: number; // single-sided transaction cost in basis points
   topQuintilePct?: number; // default 0.2 → top 20%
+  // Phase 7: cost model selection. "simple" preserves old uniform-bps
+  // behavior (default for backward compatibility with pre-Phase-7 studies);
+  // "tiered" applies per-ticker liquidity-tier spreads + sqrt(turnover)
+  // market impact + user commission on top.
+  costMode?: CostMode;
 }
 
 export interface MonthlyEquityPoint {
@@ -99,7 +109,9 @@ export function runBacktest(input: BacktestInput): BacktestPath {
     rebalanceMonths,
     txCostBps,
     topQuintilePct = 0.2,
+    costMode = "simple",
   } = input;
+  const costFn: CostFunction = costFunctionForMode(costMode);
 
   const fullAxis = buildMonthAxis(startDate, endDate);
   const tickers = Object.keys(scores);
@@ -162,7 +174,16 @@ export function runBacktest(input: BacktestInput): BacktestPath {
       const each = picks.length > 0 ? 1 / picks.length : 0;
       for (const t of picks) w[t] = each;
       const turnover = diffWeights(weights, w);
-      const drag = turnover * (txCostBps / 10000);
+      // Phase 7: drag now goes through the configured cost model (simple
+      // = uniform bps × turnover; tiered = per-ticker spread + sqrt-impact +
+      // user commission).
+      const prevHoldings = Object.keys(weights);
+      const drag = costFn({
+        prevHoldings,
+        nextHoldings: picks,
+        turnover,
+        userCommissionBps: txCostBps,
+      });
       weights = w;
       monthsSinceRebalance = 1;
       rebalances.push({

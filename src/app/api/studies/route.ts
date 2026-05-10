@@ -99,6 +99,7 @@ interface CreateStudyBody {
   benchmark?: string;
   txCostBps?: number;
   factorMix?: string;
+  costModel?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -123,10 +124,14 @@ export async function POST(req: NextRequest) {
     benchmark,
     txCostBps,
     factorMix = "momentum",
+    costModel = "tiered",
   } = body;
 
   if (factorMix !== "momentum" && factorMix !== "multifactor") {
     return badRequest("factorMix must be 'momentum' or 'multifactor'");
+  }
+  if (costModel !== "simple" && costModel !== "tiered") {
+    return badRequest("costModel must be 'simple' or 'tiered'");
   }
 
   if (!hypothesis?.trim()) return badRequest("hypothesis is required");
@@ -167,6 +172,7 @@ export async function POST(req: NextRequest) {
         benchmark,
         txCostBps,
         factorMix,
+        costModel,
       },
     });
     return NextResponse.json({ study }, { status: 201 });

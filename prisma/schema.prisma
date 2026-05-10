@@ -97,6 +97,11 @@ model Study {
   // equal-weight Value + Quality + Momentum composite. Defaults to momentum
   // so old studies and form submissions continue to work.
   factorMix  String         @default("momentum")
+  // Phase 7 — transaction cost model. "simple" preserves the original
+  // uniform-bps × turnover behavior (default for backwards compatibility);
+  // "tiered" applies liquidity-tier-aware spreads + sqrt(turnover) market
+  // impact + user commission on top.
+  costModel  String         @default("simple")
   plan       StudyPlan?
   progress   StudyProgress?
   result     StudyResult?
