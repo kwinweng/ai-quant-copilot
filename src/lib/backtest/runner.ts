@@ -25,6 +25,7 @@ import {
   type FactorCoverageReport,
 } from "@/lib/factors/multifactor";
 import { buildMultiFactorScores } from "@/lib/factors/pitMultifactor";
+import { buildRobustnessReport } from "./robustness";
 
 // Canonical step list for momentum-only studies. Multi-factor studies extend
 // this with an extra "拉取基本面数据" step — see stepsForFactorMix below.
@@ -768,6 +769,16 @@ export async function runBacktest(studyId: string): Promise<void> {
       );
     }
 
+    // Phase 8: robustness analytics — bootstrap CIs + in/out-of-sample split +
+    // halve-period metrics. Cheap (pure compute on already-loaded data) and
+    // wrapped in try/catch so any future bug here doesn't fail the study.
+    let robustness: ReturnType<typeof buildRobustnessReport> | null = null;
+    try {
+      robustness = buildRobustnessReport(path);
+    } catch (robErr) {
+      console.warn("[backtest] robustness report failed:", robErr);
+    }
+
     // Phase 4: compute multi-factor breakdown for the *latest* rebalance — gives
     // the Result page concrete Value/Quality/Momentum component scores for the
     // portfolio actually held at end-of-backtest. This is purely diagnostic;
@@ -887,6 +898,10 @@ export async function runBacktest(studyId: string): Promise<void> {
         : Prisma.DbNull,
       factorBreakdown: factorBreakdown
         ? (factorBreakdown as unknown as Prisma.InputJsonValue)
+        : Prisma.DbNull,
+      // Phase 8: robustness report — null when computation failed.
+      robustness: robustness
+        ? (robustness as unknown as Prisma.InputJsonValue)
         : Prisma.DbNull,
     };
     await prisma.studyResult.upsert({

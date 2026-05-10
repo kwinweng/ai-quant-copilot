@@ -104,6 +104,40 @@ interface ApiResult {
   // Phase 4 — multi-factor diagnostics, populated only for factorMix=multifactor.
   factorCoverage?: FactorCoverage | null;
   factorBreakdown?: FactorBreakdown | null;
+  // Phase 8 — robustness report (in/out-of-sample split + bootstrap CI +
+  // halve-period metrics). null on legacy studies.
+  robustness?: Robustness | null;
+}
+
+interface Robustness {
+  whole: { cagr: number; sharpe: number; maxDrawdown: number; monthsCount: number };
+  inSample: SubperiodMetrics;
+  outOfSample: SubperiodMetrics;
+  subperiods: SubperiodMetrics[];
+  bootstrap: {
+    sharpe: MetricCI;
+    cagr: MetricCI;
+    maxDrawdown: MetricCI;
+  };
+  generatedAt: string;
+}
+
+interface SubperiodMetrics {
+  label: string;
+  startMonth: string;
+  endMonth: string;
+  monthsCount: number;
+  cagr: number;
+  sharpe: number;
+  maxDrawdown: number;
+}
+
+interface MetricCI {
+  mean: number;
+  median: number;
+  ci95Lower: number;
+  ci95Upper: number;
+  iterations: number;
 }
 
 interface FactorCoverage {
@@ -1027,6 +1061,191 @@ function SensitivityTable({
   );
 }
 
+function RobustnessCard({ data }: { data?: Robustness | null }) {
+  if (!data) return null;
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">鲁棒性检验</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          看 alpha 是不是噪音、是不是只在某一段窗口里管用
+        </p>
+      </div>
+      <div className="px-4 py-3 space-y-4">
+        {/* In/out-of-sample split */}
+        <div>
+          <h4 className="text-xs font-semibold text-gray-700 mb-1.5">
+            样本内 / 样本外（70/30 拆分）
+          </h4>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50/60">
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-left font-medium">
+                  区间
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-left font-medium">
+                  时间窗口
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  CAGR
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  Sharpe
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  Max DD
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {[data.inSample, data.outOfSample].map((p) => (
+                <tr key={p.label} className="border-b border-gray-100 last:border-0">
+                  <td className="py-1.5 px-2 text-sm text-gray-900">{p.label}</td>
+                  <td className="py-1.5 px-2 text-xs text-gray-500 font-mono">
+                    {p.startMonth} → {p.endMonth}
+                  </td>
+                  <td className="py-1.5 px-2 text-sm text-right font-mono">
+                    {p.cagr.toFixed(2)}%
+                  </td>
+                  <td className="py-1.5 px-2 text-sm text-right font-mono">
+                    {p.sharpe.toFixed(2)}
+                  </td>
+                  <td className="py-1.5 px-2 text-sm text-right font-mono text-red-600">
+                    {p.maxDrawdown.toFixed(2)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-gray-500 mt-1.5">
+            如果样本外指标显著差于样本内，说明策略可能过拟合；样本外更接近你真实持有时的预期。
+          </p>
+        </div>
+
+        <div className="border-t border-gray-100 -mx-4" />
+
+        {/* Subperiod halves */}
+        <div>
+          <h4 className="text-xs font-semibold text-gray-700 mb-1.5">
+            前后两段对比
+          </h4>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50/60">
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-left font-medium">
+                  段
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-left font-medium">
+                  时间
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  CAGR
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  Sharpe
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  Max DD
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.subperiods.map((p) => (
+                <tr key={p.label} className="border-b border-gray-100 last:border-0">
+                  <td className="py-1.5 px-2 text-sm text-gray-900">{p.label}</td>
+                  <td className="py-1.5 px-2 text-xs text-gray-500 font-mono">
+                    {p.startMonth} → {p.endMonth}
+                  </td>
+                  <td className="py-1.5 px-2 text-sm text-right font-mono">
+                    {p.cagr.toFixed(2)}%
+                  </td>
+                  <td className="py-1.5 px-2 text-sm text-right font-mono">
+                    {p.sharpe.toFixed(2)}
+                  </td>
+                  <td className="py-1.5 px-2 text-sm text-right font-mono text-red-600">
+                    {p.maxDrawdown.toFixed(2)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-gray-500 mt-1.5">
+            两段之间差异越大 → 策略对市场制度越敏感（要警惕外推到不同环境）
+          </p>
+        </div>
+
+        <div className="border-t border-gray-100 -mx-4" />
+
+        {/* Bootstrap CI */}
+        <div>
+          <h4 className="text-xs font-semibold text-gray-700 mb-1.5">
+            Bootstrap 置信区间（{data.bootstrap.sharpe.iterations} 次重抽样）
+          </h4>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50/60">
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-left font-medium">
+                  指标
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  全样本
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  Bootstrap 中位数
+                </th>
+                <th className="py-1.5 px-2 text-xs text-gray-500 text-right font-medium">
+                  95% CI
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-gray-100">
+                <td className="py-1.5 px-2 text-sm text-gray-900">Sharpe</td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono">
+                  {data.whole.sharpe.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono">
+                  {data.bootstrap.sharpe.median.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono text-gray-600">
+                  [{data.bootstrap.sharpe.ci95Lower.toFixed(2)}, {data.bootstrap.sharpe.ci95Upper.toFixed(2)}]
+                </td>
+              </tr>
+              <tr className="border-b border-gray-100">
+                <td className="py-1.5 px-2 text-sm text-gray-900">CAGR (%)</td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono">
+                  {data.whole.cagr.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono">
+                  {data.bootstrap.cagr.median.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono text-gray-600">
+                  [{data.bootstrap.cagr.ci95Lower.toFixed(2)}, {data.bootstrap.cagr.ci95Upper.toFixed(2)}]
+                </td>
+              </tr>
+              <tr>
+                <td className="py-1.5 px-2 text-sm text-gray-900">Max DD (%)</td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono text-red-600">
+                  {data.whole.maxDrawdown.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono text-red-600">
+                  {data.bootstrap.maxDrawdown.median.toFixed(2)}
+                </td>
+                <td className="py-1.5 px-2 text-sm text-right font-mono text-red-600">
+                  [{data.bootstrap.maxDrawdown.ci95Lower.toFixed(2)}, {data.bootstrap.maxDrawdown.ci95Upper.toFixed(2)}]
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="text-xs text-gray-500 mt-1.5">
+            CI 越窄 → 该指标越确定。如 Sharpe 全样本 0.85 但 95% CI [0.20, 1.50]，意味着「真实 Sharpe 可能从 0.20 到 1.50 都有可能」，alpha 不显著。
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ParameterSensitivityCard({
   data,
 }: {
@@ -1494,6 +1713,7 @@ export default function ResultPage() {
         <div className="space-y-5">
           <FactorDiagnostics data={result.factorDiagnostics} />
           <FactorCoverageCard data={result.factorCoverage} />
+          <RobustnessCard data={result.robustness} />
           <ParameterSensitivityCard data={result.parameterSensitivity} />
         </div>
       )}

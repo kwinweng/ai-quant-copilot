@@ -155,6 +155,9 @@ model StudyResult {
   // Phase 4 — multi-factor diagnostics. Null for legacy/momentum-only studies.
   factorCoverage       Json?
   factorBreakdown      Json?
+  // Phase 8 — robustness report (in/out-of-sample split + bootstrap CI +
+  // subperiod metrics). Null for legacy results that pre-date the column.
+  robustness           Json?
   createdAt         DateTime @default(now())
 }
 

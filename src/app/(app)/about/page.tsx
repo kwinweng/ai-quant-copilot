@@ -40,6 +40,24 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Phase 8 · OOS 拆分 + Bootstrap 置信区间",
+    date: "2026-05-11",
+    title: "把 alpha 是否显著、是否依赖某段时间窗口暴露出来",
+    summary:
+      "回测完成后自动跑：70/30 样本内/外拆分（看 OOS 衰减）+ 前后两段对比（看制度敏感性）+ Bootstrap 1000 次重抽样的 95% CI（看噪音 vs 信号）。结果页「分析」tab 加 RobustnessCard。",
+    highlights: [
+      "新模块 src/lib/backtest/robustness.ts：纯函数，月度收益输入，输出三个分析",
+      "splitInSampleOutOfSample(0.7) → 样本内/外指标差异",
+      "halfSplit → 前后段 CAGR/Sharpe/MaxDD 对比",
+      "bootstrapMetricCI：IID 重抽样 1000 次，确定性种子，输出 mean/median/95% CI",
+      "StudyResult.robustness Json? 字段持久化报告",
+      "结果页分析 tab 新 RobustnessCard：3 张子表 + 解读说明",
+      "+13 个测试（robustness 13 个：split 数学、bootstrap 确定性、regime-shift 检测）",
+      "已知简化：使用 IID bootstrap（非 stationary block bootstrap），月度大市值数据下差异有限",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
     version: "Phase 7 · 真实交易成本模型",
     date: "2026-05-11",
     title: "分层流动性 + 平方根市场冲击，新研究默认实盘可信",
