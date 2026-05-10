@@ -136,14 +136,17 @@ export function MobileTopBar() {
   );
 }
 
-// Sprint #3: mobile bar is space-constrained; only show the 4 most-used
-// destinations. 数据源 / 关于 stay accessible via the desktop sidebar (and
-// in-page links from the dashboard footer / about page entry).
+// Sprint #3: mobile bar is space-constrained; show 5 of 6 destinations.
+// We keep 关于 (it's the help / changelog reference users actually need)
+// and drop 数据源 instead — that page is a demo placeholder and doesn't
+// drive the daily workflow. 数据源 stays available on the desktop sidebar
+// and via the dashboard's data-source footer panel link.
 const MOBILE_NAV_HREFS = new Set([
   "/",
   "/studies/coach",
   "/studies/new",
   "/studies/compare",
+  "/about",
 ]);
 
 export function MobileTabBar() {
