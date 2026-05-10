@@ -4,6 +4,7 @@ import type { FundamentalSnapshot, FundamentalSource } from "./types";
 import { YahooFundamentalsProvider } from "./yahoo";
 import { SecEdgarProvider } from "./sec";
 import { mergeFundamentals } from "./merge";
+import { withInflightDedup } from "@/lib/util/inflight";
 
 // Phase 4 cache TTL: re-fetch a snapshot if our latest cached row is older
 // than this. Fundamentals change quarterly, so a day is plenty fresh.
@@ -102,9 +103,7 @@ async function writeCached(snap: FundamentalSnapshot): Promise<void> {
 export async function getMergedSnapshot(
   ticker: string,
 ): Promise<FundamentalSnapshot | undefined> {
-  const existing = inflightMergedSnapshot.get(ticker);
-  if (existing) return existing;
-  const p = (async () => {
+  return withInflightDedup(inflightMergedSnapshot, ticker, async () => {
     const [yahooRow, secRow] = await Promise.all([
       prisma.fundamentalSnapshot.findFirst({
         where: { ticker, source: "yahoo" },
@@ -155,11 +154,7 @@ export async function getMergedSnapshot(
     ]);
 
     return mergeFundamentals(yahooSnap, secSnap);
-  })().finally(() => {
-    inflightMergedSnapshot.delete(ticker);
   });
-  inflightMergedSnapshot.set(ticker, p);
-  return p;
 }
 
 // =====================================================================
@@ -200,6 +195,11 @@ async function refreshSecHistory(ticker: string): Promise<FundamentalSnapshot[]>
 // SEC throttles aggressive callers and a small cluster of users could
 // trip a 429 / IP block. We coalesce parallel refresh calls into a single
 // in-flight Promise that everyone awaits.
+//
+// Sprint #7: extracted the dedup pattern itself to src/lib/util/inflight.ts
+// so it can be unit-tested in isolation without spinning up Prisma. The
+// per-key Maps still live here because they belong to this module's
+// caching policy, not a generic utility.
 const inflightSecHistory = new Map<string, Promise<FundamentalSnapshot[]>>();
 const inflightMergedSnapshot = new Map<
   string,
@@ -207,13 +207,9 @@ const inflightMergedSnapshot = new Map<
 >();
 
 function dedupedSecHistory(ticker: string): Promise<FundamentalSnapshot[]> {
-  const existing = inflightSecHistory.get(ticker);
-  if (existing) return existing;
-  const p = refreshSecHistory(ticker).finally(() => {
-    inflightSecHistory.delete(ticker);
-  });
-  inflightSecHistory.set(ticker, p);
-  return p;
+  return withInflightDedup(inflightSecHistory, ticker, () =>
+    refreshSecHistory(ticker),
+  );
 }
 
 /**

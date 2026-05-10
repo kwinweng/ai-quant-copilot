@@ -40,6 +40,27 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Sprint #7 · 测试与正确性硬化",
+    date: "2026-05-10",
+    title: "Vitest 引入 + 64 个核心单测覆盖关键边界",
+    summary:
+      "零新功能、零行为变化的内部 Sprint：Vitest 接入 + 把 PIT 逻辑、回测引擎、metrics、merge 优先级、in-flight 去重、/start 原子声明等高风险路径用 64 个单测固化。",
+    highlights: [
+      "vitest@4 + @/* alias，npm test / npm run test:watch 即跑",
+      "src/lib/factors/pitMultifactor.ts —— 从 runner.ts 抽出 monthKeyToCutoff / pickSnapshotAsOf / crossSectionalZ / buildMultiFactorScores 的纯函数模块",
+      "src/lib/util/inflight.ts —— 从 cache.ts 抽出通用 in-flight 去重 helper",
+      "PIT 测试 17 个：cutoff 边界、SEC as-of 不泄露未来 filing、PIT 视野下排序方向跟随 SEC 数据切换",
+      "engine 测试 6 个：axis 严格 1 月间距（H3）、缺失价格不崩、月/季再平衡频率差异、txCost 真扣 equity",
+      "metrics 测试 12 个：CAGR 年化、Sharpe ≈ mean/std×√12、Max DD 峰谷追踪、turnover 年化、SPY 自比 alpha=0/beta=1",
+      "factor 测试 9 个：12-1 = computeMomentum(12,1)、ranking ticker 字典序 tiebreaker（M2）",
+      "merge 测试 11 个：Yahoo wins Value、SEC wins Quality、SEC reportedAt 保留、缺失字段回退",
+      "inflight 测试 5 个：同 key 复用、不同 key 隔离、resolve/reject 后清理",
+      "/start route 测试 5 个：updateMany 谓词形状、alreadyRunning 路径、并发声明只一个成功",
+      "总：7 测试文件 / 64 测试 / 全过 / 200ms 内跑完",
+    ],
+    badge: { label: "infra", tone: "infra" },
+  },
+  {
     version: "PWA · iOS 主屏 App",
     date: "2026-05-10",
     title: "iOS / Android 添加到主屏幕原生体验",
