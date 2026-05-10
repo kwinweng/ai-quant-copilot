@@ -379,6 +379,35 @@ async function setStep(
   });
 }
 
+// Sprint #4 U10: lightweight in-flight note update so the running page can
+// show "Yahoo+SEC 17/30 · SEC 历史 12/30" within a step instead of just
+// spinning silently for 30-60 seconds.
+async function updateStepNote(
+  studyId: string,
+  index: number,
+  note: string,
+): Promise<void> {
+  try {
+    const { steps, logs } = await readStepsAndLogs(studyId);
+    if (index >= 0 && index < steps.length) {
+      steps[index] = { ...steps[index], note };
+      await prisma.studyProgress.update({
+        where: { studyId },
+        data: {
+          steps: steps as unknown as Prisma.InputJsonValue,
+          logs: logs as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
+  } catch (err) {
+    // Note updates are best-effort UI sugar — never let them fail the run.
+    console.warn(
+      `[backtest] updateStepNote failed for ${studyId}@${index}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
 async function appendLog(
   studyId: string,
   message: string,
@@ -709,13 +738,28 @@ export async function runBacktest(studyId: string): Promise<void> {
         studyId,
         3,
         "running",
-        `开始拉取基本面数据（Yahoo 当前快照 + SEC EDGAR 历史 filings，${UNIVERSE.length} 个标的）`,
+        `开始拉取基本面数据（Yahoo 当前快照 + SEC EDGAR 历史 filings，${UNIVERSE.length} 个标的，首次约 30-60 秒，后续 24h 内复用缓存）`,
+        `0/${UNIVERSE.length}`,
       );
+      // Sprint #4 U10: maintain a live note string showing both fetchers'
+      // progress so the running page reflects within-step movement.
+      let mergedDone = 0;
+      let secDone = 0;
+      const total = UNIVERSE.length;
+      const refreshNote = () => {
+        updateStepNote(
+          studyId,
+          3,
+          `Yahoo+SEC ${mergedDone}/${total} · SEC 历史 ${secDone}/${total}`,
+        ).catch(() => {});
+      };
       const [merged, history] = await Promise.all([
         getMergedSnapshotsForUniverse(
           UNIVERSE,
           4,
-          ({ ticker, completed, total, hasData }) => {
+          ({ ticker, completed, hasData }) => {
+            mergedDone = completed;
+            refreshNote();
             if (completed % 5 === 0 || completed === total) {
               appendLog(
                 studyId,
@@ -727,7 +771,9 @@ export async function runBacktest(studyId: string): Promise<void> {
         getSecHistoryForUniverse(
           UNIVERSE,
           4,
-          ({ ticker, completed, total, snapshotCount }) => {
+          ({ ticker, completed, snapshotCount }) => {
+            secDone = completed;
+            refreshNote();
             if (completed % 5 === 0 || completed === total) {
               appendLog(
                 studyId,

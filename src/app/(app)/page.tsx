@@ -126,23 +126,37 @@ function MetricCell({
   label,
   value,
   positive,
+  vsLabel,
 }: {
   label: string;
   value: string;
   positive?: boolean;
+  vsLabel?: string;
 }) {
+  // Sprint #4 U13: don't rely on color alone. ▲ for "better than benchmark",
+  // ▼ for "worse" — color stays as a secondary signal. Tooltip explains
+  // direction in plain words for screen-readers and color-blind users.
   return (
     <div className="flex flex-col">
       <span className="text-xs text-gray-500">{label}</span>
       <span
-        className={`text-sm font-semibold ${
+        className={`text-sm font-semibold inline-flex items-center gap-1 ${
           positive === true
-            ? "text-green-600"
+            ? "text-green-700"
             : positive === false
               ? "text-red-600"
               : "text-gray-900"
         }`}
+        title={
+          positive === true
+            ? `${label} 优于基准${vsLabel ? `（${vsLabel}）` : ""}`
+            : positive === false
+              ? `${label} 弱于基准${vsLabel ? `（${vsLabel}）` : ""}`
+              : undefined
+        }
       >
+        {positive === true && <span aria-label="优于基准">▲</span>}
+        {positive === false && <span aria-label="弱于基准">▼</span>}
         {value}
       </span>
     </div>

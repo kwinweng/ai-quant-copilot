@@ -40,6 +40,24 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Sprint #4 · 结果页重构 + 移动适配",
+    date: "2026-05-10",
+    title: "tab 重构、移动图表、PIT 进度、retry 文案、色盲适配",
+    summary:
+      "结果页 4 tab 重新分配：概览（唯一指标表）/ 表现（合并 perf+risk）/ 持仓（新）/ 分析。同步修移动端图表、多因子拉取 ETA、失败重试文案、色盲信号、clone 提示等 7 项 UX。",
+    highlights: [
+      "U8 — 结果页 4 tab 重排：概览只剩唯一一张指标表（消除 3 处重复），新增「持仓」tab 容纳再平衡历史 + 多因子分解",
+      "U5 — useIsNarrow hook：移动端线条加粗、tick 间隔放宽、SPY 虚线模式增强，不再挤成一团",
+      "U10 — runner 在拉基本面时实时更新 step note：「Yahoo+SEC 17/30 · SEC 历史 12/30」",
+      "U10 — 初始消息加 ETA 提示：「首次约 30-60 秒，后续 24h 内复用缓存」",
+      "U11 — Running 页失败按钮按 step 区分文案：plan 阶段失败 → 「返回研究计划」；其他 → 「重新执行回测」",
+      "U13 — MetricCell 增加 ▲▼ 三角符号 + title 提示，色盲用户也能识别强弱",
+      "U14 — Clone 模式下假设输入框边框变琥珀色 + 标题加「记得改一改差异点」标签",
+      "U15 — DataQualityCard fallback 按 factorMix 区分：multifactor 模式下显示「混合 PIT」描述而非动量话术",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
     version: "Sprint #3 · AI 假设教练",
     date: "2026-05-10",
     title: "对话式假设设计 + 28 条分级例子库",

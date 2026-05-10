@@ -170,10 +170,17 @@ const fetcher = (url: string) =>
     return r.json();
   });
 
+// Sprint #4 U8: tab restructure.
+// Was 5 tabs (overview/performance/risk/analysis/logs) with MetricsTable
+// rendered three times across overview/performance/risk. Now 4 tabs:
+//   • 概览 — AI conclusion + DataQuality + the *only* MetricsTable + Best/Worst Months
+//   • 表现 — return charts (equity / drawdown / annual) + annual table
+//   • 持仓 — RebalanceHistoryCard + FactorBreakdownCard (was buried in analysis)
+//   • 分析 — FactorDiagnostics + FactorCoverageCard + ParameterSensitivityCard
 const TABS = [
   { key: "overview", label: "概览" },
   { key: "performance", label: "表现" },
-  { key: "risk", label: "风险" },
+  { key: "holdings", label: "持仓" },
   { key: "analysis", label: "分析" },
 ] as const;
 
@@ -331,6 +338,22 @@ function ChartCard({
   );
 }
 
+// Sprint #4 U5: window-width hook used by chart components to bump line
+// strokes and reduce X-axis tick density on narrow screens, where the
+// previous 1.5px dashed SPY line was unreadable against the 2px solid
+// strategy line at 320-360px widths.
+function useIsNarrow(breakpointPx = 640): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setNarrow(window.innerWidth < breakpointPx);
+    update();
+    window.addEventListener("resize", update, { passive: true });
+    return () => window.removeEventListener("resize", update);
+  }, [breakpointPx]);
+  return narrow;
+}
+
 function EquityChart({
   data,
   height = 240,
@@ -338,26 +361,36 @@ function EquityChart({
   data: ApiResult["equityCurve"];
   height?: number;
 }) {
-  const sample = data.filter((_, i) => i % 2 === 0);
+  const narrow = useIsNarrow();
+  // On narrow screens we keep every data point — the previous "every other"
+  // sampling made it look choppy. Subsampling is only useful on desktop
+  // where there's enough x-axis room for high-density lines anyway.
+  const sample = narrow ? data : data.filter((_, i) => i % 2 === 0);
+  const tickInterval = narrow ? 7 : 3;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={sample} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+      <LineChart data={sample} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
         <XAxis
           dataKey="date"
           tick={chartTickStyle}
           tickLine={false}
-          interval={3}
+          interval={tickInterval}
           axisLine={{ stroke: chartGrid }}
         />
-        <YAxis tick={chartTickStyle} tickLine={false} axisLine={false} />
+        <YAxis
+          tick={chartTickStyle}
+          tickLine={false}
+          axisLine={false}
+          width={narrow ? 38 : 50}
+        />
         <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Line
           type="monotone"
           dataKey="strategy"
           stroke={STRATEGY_COLOR}
-          strokeWidth={2}
+          strokeWidth={narrow ? 2.5 : 2}
           dot={false}
           name="策略"
         />
@@ -365,10 +398,10 @@ function EquityChart({
           type="monotone"
           dataKey="spy"
           stroke={SPY_COLOR}
-          strokeWidth={1.5}
+          strokeWidth={narrow ? 2 : 1.5}
           dot={false}
           name="基准"
-          strokeDasharray="4 2"
+          strokeDasharray={narrow ? "6 3" : "4 2"}
         />
       </LineChart>
     </ResponsiveContainer>
@@ -382,19 +415,26 @@ function DrawdownChart({
   data: ApiResult["drawdown"];
   height?: number;
 }) {
-  const sample = data.filter((_, i) => i % 2 === 0);
+  const narrow = useIsNarrow();
+  const sample = narrow ? data : data.filter((_, i) => i % 2 === 0);
+  const tickInterval = narrow ? 7 : 3;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={sample} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+      <LineChart data={sample} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
         <XAxis
           dataKey="date"
           tick={chartTickStyle}
           tickLine={false}
-          interval={3}
+          interval={tickInterval}
           axisLine={{ stroke: chartGrid }}
         />
-        <YAxis tick={chartTickStyle} tickLine={false} axisLine={false} />
+        <YAxis
+          tick={chartTickStyle}
+          tickLine={false}
+          axisLine={false}
+          width={narrow ? 38 : 50}
+        />
         <ReferenceLine y={0} stroke="#d1d5db" />
         <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -402,7 +442,7 @@ function DrawdownChart({
           type="monotone"
           dataKey="strategy"
           stroke={STRATEGY_COLOR}
-          strokeWidth={2}
+          strokeWidth={narrow ? 2.5 : 2}
           dot={false}
           name="策略"
         />
@@ -410,10 +450,10 @@ function DrawdownChart({
           type="monotone"
           dataKey="spy"
           stroke={SPY_COLOR}
-          strokeWidth={1.5}
+          strokeWidth={narrow ? 2 : 1.5}
           dot={false}
           name="基准"
-          strokeDasharray="4 2"
+          strokeDasharray={narrow ? "6 3" : "4 2"}
         />
       </LineChart>
     </ResponsiveContainer>
@@ -611,7 +651,13 @@ function AIKeyPoints({
 // Months, Rebalance History.
 // ====================================================================
 
-function DataQualityCard({ dq }: { dq?: DataQuality }) {
+function DataQualityCard({
+  dq,
+  factorMix,
+}: {
+  dq?: DataQuality;
+  factorMix?: string;
+}) {
   // Even if dq is empty (legacy result), render a hard-coded baseline so the
   // disclaimer is always present per Phase 3.1 requirement.
   const universeNote =
@@ -620,9 +666,14 @@ function DataQualityCard({ dq }: { dq?: DataQuality }) {
   const survivorshipNote =
     dq?.survivorshipNote ??
     "因为股票池在整个回测窗口里固定，已退市/被剔除指数的标的不在样本里，回测结果存在幸存者偏差";
-  const factorTypeNote =
-    dq?.factorTypeNote ??
-    "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子";
+  // Sprint #4 U15: factorMix-aware fallback. The previous fallback only
+  // mentioned momentum, which would mislead users running multifactor studies
+  // if the runner failed to populate factorTypeNote.
+  const factorTypeFallback =
+    factorMix === "multifactor"
+      ? "多因子（Value + Quality + 12-1 Momentum）；SEC Quality 因子已 PIT（90 天 reporting lag），Yahoo Value 因子仍是 point-in-now 静态贴一份。"
+      : "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子";
+  const factorTypeNote = dq?.factorTypeNote ?? factorTypeFallback;
   const advisoryDisclaimer =
     dq?.advisoryDisclaimer ?? "本研究结果仅供研究和教育用途，不构成投资建议";
   const coverage = dq?.priceCoverage;
@@ -1381,7 +1432,7 @@ export default function ResultPage() {
           {/* Phase 3.1: data-quality / bias panel always at the top of the
               overview so users can't miss the survivorship and factor-type
               caveats. */}
-          <DataQualityCard dq={result.dataQuality} />
+          <DataQualityCard dq={result.dataQuality} factorMix={study.factorMix} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="space-y-5">
@@ -1403,9 +1454,6 @@ export default function ResultPage() {
               <ChartCard title="回撤（%）">
                 <DrawdownChart data={result.drawdown} height={180} />
               </ChartCard>
-              <ChartCard title="年度收益（%）">
-                <AnnualReturnsChart data={result.annualReturns} height={200} />
-              </ChartCard>
             </div>
           </div>
           <AIKeyPoints
@@ -1422,21 +1470,20 @@ export default function ResultPage() {
           <ChartCard title="累计收益（基准化为 100）">
             <EquityChart data={result.equityCurve} height={300} />
           </ChartCard>
+          <ChartCard title="回撤曲线（%）">
+            <DrawdownChart data={result.drawdown} height={260} />
+          </ChartCard>
           <ChartCard title="年度收益（%）">
             <AnnualReturnsChart data={result.annualReturns} height={260} />
           </ChartCard>
           <AnnualReturnsTable data={result.annualReturns} />
-          <BestWorstMonthsCard monthly={result.monthlyReturns} />
-          <MetricsTable result={result} />
         </div>
       )}
 
-      {activeTab === "risk" && (
+      {activeTab === "holdings" && (
         <div className="space-y-5">
-          <ChartCard title="回撤曲线（%）">
-            <DrawdownChart data={result.drawdown} height={300} />
-          </ChartCard>
-          <MetricsTable result={result} />
+          <FactorBreakdownCard data={result.factorBreakdown} />
+          <RebalanceHistoryCard history={result.rebalanceHistory} />
         </div>
       )}
 
@@ -1444,9 +1491,7 @@ export default function ResultPage() {
         <div className="space-y-5">
           <FactorDiagnostics data={result.factorDiagnostics} />
           <FactorCoverageCard data={result.factorCoverage} />
-          <FactorBreakdownCard data={result.factorBreakdown} />
           <ParameterSensitivityCard data={result.parameterSensitivity} />
-          <RebalanceHistoryCard history={result.rebalanceHistory} />
         </div>
       )}
 

@@ -228,14 +228,26 @@ function NewStudyForm() {
         {/* Hypothesis */}
         <Card className="bg-white border-gray-200 text-gray-900">
           <CardHeader className="pb-2 pt-4 px-4 border-gray-100">
-            <CardTitle className="text-sm font-semibold text-gray-900">
-              投资假设
+            <CardTitle className="text-sm font-semibold text-gray-900 flex items-center justify-between gap-2">
+              <span>投资假设</span>
+              {/* Sprint #4 U14: surface a "记得改假设" warning so cloned
+                  studies don't accidentally re-run with the source's
+                  identical hypothesis text. */}
+              {cloneFrom && cloneStatus === "loaded" && (
+                <span className="text-[10px] font-normal text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                  已复制源研究的假设，记得改一改差异点
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4 space-y-2">
             <div className="relative">
               <textarea
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-900 bg-white placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  cloneFrom && cloneStatus === "loaded"
+                    ? "border-amber-300"
+                    : "border-gray-200"
+                }`}
                 rows={4}
                 placeholder="请描述您的投资假设，例如：美股大盘股中，低估值 + 高质量因子组合在 10 年内超越 SPY..."
                 value={hypothesis}

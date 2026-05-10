@@ -62,6 +62,61 @@ function formatElapsed(ms: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
+// Sprint #4 U11: context-aware retry button. The previous always-says-"重试"
+// button POSTed /start regardless of where the failure happened. Now we
+// route plan-step failures back to the plan page (where DeepSeek can be
+// re-invoked) and route everything else to /start.
+function RetryButton({
+  study,
+  erroredStepName,
+  onError,
+  onRetryStart,
+  onMutate,
+}: {
+  study: { id: string };
+  erroredStepName?: string;
+  onError: (msg: string) => void;
+  onRetryStart: () => void;
+  onMutate: () => Promise<unknown>;
+}) {
+  const router = useRouter();
+  const isPlanStep =
+    erroredStepName?.includes("计划") || erroredStepName === "校验参数";
+
+  if (isPlanStep) {
+    return (
+      <button
+        type="button"
+        className="text-xs text-red-700 hover:text-red-900 underline shrink-0"
+        onClick={() => router.push(`/studies/${study.id}/plan`)}
+      >
+        返回研究计划
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="text-xs text-red-700 hover:text-red-900 underline shrink-0"
+      onClick={async () => {
+        onRetryStart();
+        try {
+          const res = await fetch(`/api/studies/${study.id}/start`, {
+            method: "POST",
+          });
+          if (!res.ok) throw new Error(`重试失败 (HTTP ${res.status})`);
+          await onMutate();
+        } catch (err) {
+          onError(err instanceof Error ? err.message : "重试失败");
+        }
+      }}
+    >
+      重新执行回测
+    </button>
+  );
+}
+
 export default function RunningPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -210,32 +265,27 @@ export default function RunningPage() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-start gap-2">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <div className="font-medium">回测失败</div>
+            <div className="font-medium">
+              {erroredStep
+                ? `失败于「${erroredStep.name}」`
+                : "回测失败"}
+            </div>
             <div className="mt-0.5 text-red-600">
               {errorMsg ??
                 logs.findLast?.((l) => l.level === "error")?.message ??
                 "请查看日志了解详情"}
             </div>
           </div>
-          <button
-            type="button"
-            className="text-xs text-red-700 hover:text-red-900 underline shrink-0"
-            onClick={async () => {
+          <RetryButton
+            study={study}
+            erroredStepName={erroredStep?.name}
+            onError={(m) => setErrorMsg(m)}
+            onRetryStart={() => {
               setErrorMsg(null);
               startingRef.current = false;
-              try {
-                const res = await fetch(`/api/studies/${study.id}/start`, {
-                  method: "POST",
-                });
-                if (!res.ok) throw new Error(`重试失败 (HTTP ${res.status})`);
-                await mutate();
-              } catch (err) {
-                setErrorMsg(err instanceof Error ? err.message : "重试失败");
-              }
             }}
-          >
-            重试
-          </button>
+            onMutate={() => mutate()}
+          />
         </div>
       )}
 
