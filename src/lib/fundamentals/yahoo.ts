@@ -16,6 +16,8 @@ interface YfQuoteSummary {
     trailingPE?: YfNumeric;
     priceToBook?: YfNumeric;
     enterpriseToEbitda?: YfNumeric;
+    enterpriseValue?: YfNumeric;
+    ebitda?: YfNumeric;
     lastFiscalYearEnd?: YfNumeric;
   };
   summaryDetail?: {
@@ -28,6 +30,9 @@ interface YfQuoteSummary {
     debtToEquity?: YfNumeric;
     revenueGrowth?: YfNumeric;
     earningsGrowth?: YfNumeric;
+    ebitda?: YfNumeric;
+    totalDebt?: YfNumeric;
+    totalCash?: YfNumeric;
   };
 }
 
@@ -121,7 +126,27 @@ export class YahooFundamentalsProvider implements FundamentalsProvider {
       pe: num(unwrap(dks?.trailingPE) ?? unwrap(sd?.trailingPE)),
       pb: num(unwrap(dks?.priceToBook)),
       ps: num(unwrap(sd?.priceToSalesTrailing12Months)),
-      evEbitda: num(unwrap(dks?.enterpriseToEbitda)),
+      // Phase 4+ improvement: if Yahoo's direct enterpriseToEbitda is missing
+      // but the components are present, derive it. This recovers a few tickers
+      // where Yahoo computes EV and EBITDA but skips the ratio.
+      evEbitda: (() => {
+        const direct = unwrap(dks?.enterpriseToEbitda);
+        if (typeof direct === "number" && Number.isFinite(direct)) {
+          return num(direct);
+        }
+        const ev = unwrap(dks?.enterpriseValue);
+        const ebitda = unwrap(dks?.ebitda) ?? unwrap(fd?.ebitda);
+        if (
+          typeof ev === "number" &&
+          typeof ebitda === "number" &&
+          Number.isFinite(ev) &&
+          Number.isFinite(ebitda) &&
+          ebitda !== 0
+        ) {
+          return num(ev / ebitda);
+        }
+        return undefined;
+      })(),
       roe: pct(unwrap(fd?.returnOnEquity)),
       // Yahoo doesn't expose ROIC via quoteSummary; left undefined and the
       // factor scoring code treats undefined as missing.

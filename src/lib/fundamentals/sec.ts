@@ -1,4 +1,4 @@
-import { TICKER_TO_CIK } from "@/lib/backtest/universe";
+import { resolveCik } from "./cikMap";
 import type {
   FundamentalSnapshot,
   FundamentalsProvider,
@@ -140,9 +140,11 @@ export class SecEdgarProvider implements FundamentalsProvider {
   readonly name = "sec" as const;
 
   async fetch(ticker: string): Promise<FundamentalSnapshot | undefined> {
-    const cik = TICKER_TO_CIK[ticker];
+    const cik = await resolveCik(ticker);
     if (!cik) {
-      console.warn(`[fundamentals/sec] no CIK for ${ticker}`);
+      console.warn(
+        `[fundamentals/sec] no CIK for ${ticker} (hardcoded + remote both empty)`,
+      );
       return undefined;
     }
 
@@ -206,6 +208,29 @@ export class SecEdgarProvider implements FundamentalsProvider {
           stockholdersEquity.val
         : undefined;
 
+    // Phase 4+ improvement: ROIC self-computed from SEC concepts.
+    //
+    // Pure-NOPAT formula (NetIncome + after-tax interest expense ÷ invested
+    // capital) requires consistent InterestExpense and IncomeTaxExpense tags
+    // across filers — those vary too much to be reliable for a 30-ticker
+    // batch. We use the simplified textbook proxy instead:
+    //
+    //   ROIC ≈ NetIncome (TTM) / InvestedCapital
+    //   InvestedCapital = StockholdersEquity + TotalDebt
+    //
+    // It's not strictly "ROIC" in the academic sense (no after-tax interest
+    // adjustment), but it's a defensible quality signal that's computable for
+    // every filer and points the same direction as full ROIC. We label this
+    // explicitly in the data quality panel via factorTypeNote.
+    const investedCapital =
+      (stockholdersEquity?.val ?? 0) +
+      (longTermDebt?.val ?? 0) +
+      (shortTermDebt?.val ?? 0);
+    const roic =
+      netIncome && investedCapital > 0
+        ? Math.round((netIncome.value / investedCapital) * 1000) / 10
+        : undefined;
+
     // Revenue growth YoY: pull two consecutive annuals if possible.
     let revenueGrowth: number | undefined;
     const revPoints = getConcept(
@@ -266,9 +291,7 @@ export class SecEdgarProvider implements FundamentalsProvider {
       ps: undefined,
       evEbitda: undefined,
       roe,
-      // ROIC requires NOPAT + invested capital — both derivable from XBRL but
-      // tagging varies a lot across filers. Defer to a later iteration.
-      roic: undefined,
+      roic,
       grossMargin,
       debtToEquity,
       revenueGrowth,

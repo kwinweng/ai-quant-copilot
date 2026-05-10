@@ -114,6 +114,7 @@ function buildMultiFactorScores(
   const psZ = fieldZ("ps", true);
   const evZ = fieldZ("evEbitda", true);
   const roeZ = fieldZ("roe", false);
+  const roicZ = fieldZ("roic", false);
   const gmZ = fieldZ("grossMargin", false);
   const deZ = fieldZ("debtToEquity", true);
 
@@ -125,7 +126,7 @@ function buildMultiFactorScores(
       const v = m.get(t);
       if (v !== undefined) components.push(v);
     }
-    for (const m of [roeZ, gmZ, deZ]) {
+    for (const m of [roeZ, roicZ, gmZ, deZ]) {
       const v = m.get(t);
       if (v !== undefined) components.push(v);
     }
@@ -869,7 +870,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         ? "Multi-factor (Value + Quality + 12-1 Momentum)"
         : "Price-only momentum",
       factorTypeNote: isMultiFactor
-        ? "Value/Quality 使用 Yahoo + SEC EDGAR 当前快照（点-in-now），并非历史 PIT 数据；回测假设这些基本面在整个窗口期保持不变，存在前视偏差。Momentum 是月度滚动 12-1。"
+        ? "Value/Quality 使用 Yahoo + SEC EDGAR 当前快照（点-in-now），并非历史 PIT 数据；回测假设这些基本面在整个窗口期保持不变，存在前视偏差。ROIC 为简化版 NetIncome/(Equity+TotalDebt) 代理，未做后税利息调整。EV/EBITDA 优先取 Yahoo 直接值，缺失时用 EV÷EBITDA 自算兜底。Momentum 是月度滚动 12-1。"
         : "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子",
       priceCoverage: {
         totalDataPoints: totalPoints,
