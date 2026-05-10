@@ -40,6 +40,49 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Phase 4.2 · PIT 历史快照",
+    date: "2026-05-10",
+    title: "消除 SEC 字段的前视偏差",
+    summary:
+      "Quality 因子（ROE / ROIC / 毛利率 / 负债权益）从「point-in-now 静态贴一份」改为「point-in-time 历史」：每月只用 SEC 提交日早于该月 90 天前的 filing。",
+    highlights: [
+      "SEC provider 新增 fetchAll(ticker)：返回每个历史 10-K filing 形成的快照数组",
+      "Cache 表原生支持多行（PK 已包含 fiscalDate），增加 getSecHistory / getSecHistoryForUniverse 接口",
+      "buildMultiFactorScores 重写为 PIT-aware：Quality 字段每月用截止日前最新 filing 做横截面 z-score",
+      "Reporting lag = 90 天，覆盖典型 10-K 提交延迟",
+      "Yahoo Value 因子（PE/PB/PS/EV-EBITDA）仍为 point-in-now（无历史 API），披露文案明确「混合 PIT」",
+      "Runner 中 Yahoo 当前快照 + SEC 历史 filings 并行拉取",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
+    version: "Phase 4.1 · 改进微调",
+    date: "2026-05-10",
+    title: "CIK 自动 fallback + ROIC 自算 + EV/EBITDA 兜底",
+    summary:
+      "Phase 4 末尾列出的 4 项改进里的 3 项：补齐 Quality 因子完整度，提升 Value 因子覆盖率，让 CIK 表自动维护。",
+    highlights: [
+      "新建 cikMap.ts：硬编码 30 标的为主，cache miss 时从 sec.gov/files/company_tickers.json 拉取并内存缓存",
+      "ROIC 自算：NetIncome / (Equity + 长债 + 短债) 简化代理，参与 Quality 合成",
+      "EV/EBITDA 兜底：Yahoo enterpriseToEbitda 缺失时用 enterpriseValue ÷ ebitda 自算",
+      "披露文案同步更新：明确 ROIC 是简化代理、EV/EBITDA 兜底来源",
+    ],
+    badge: { label: "feature", tone: "feature" },
+  },
+  {
+    version: "关于页",
+    date: "2026-05-10",
+    title: "新增「关于」入口（使用说明 + 更新记录）",
+    summary:
+      "侧边栏第 5 个入口；两个 tab：使用说明（5 步研究流 + Dashboard 用法 + 数据源限制）和更新记录（按时间倒序）。",
+    highlights: [
+      "新路由 /about（auth-gated）",
+      "侧边栏 + 移动 tab bar 加 Info 图标入口",
+      "Changelog 数据为唯一源——上线新 phase 只需在数组顶部加一条",
+    ],
+    badge: { label: "infra", tone: "infra" },
+  },
+  {
     version: "Phase 4",
     date: "2026-05-10",
     title: "基本面数据 + 多因子研究基础",
