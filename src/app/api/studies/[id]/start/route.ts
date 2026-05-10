@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser, notFound, serverError } from "@/lib/api";
-import { runBacktest, BACKTEST_STEPS } from "@/lib/backtest/runner";
+import { runBacktest, stepsForFactorMix } from "@/lib/backtest/runner";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-const PENDING_STEPS = BACKTEST_STEPS.map((s) => ({
-  name: s.name,
-  description: s.description,
-  status: "pending" as const,
-}));
+function pendingStepsFor(factorMix: string) {
+  return stepsForFactorMix(factorMix).map((s) => ({
+    name: s.name,
+    description: s.description,
+    status: "pending" as const,
+  }));
+}
 
 export async function POST(_req: Request, ctx: Ctx) {
   const { session, response } = await requireUser();
@@ -20,7 +22,7 @@ export async function POST(_req: Request, ctx: Ctx) {
   try {
     const study = await prisma.study.findFirst({
       where: { id, userId: session!.user.id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, factorMix: true },
     });
     if (!study) return notFound("Study not found");
 
@@ -33,18 +35,19 @@ export async function POST(_req: Request, ctx: Ctx) {
       return NextResponse.json({ progress, alreadyRunning: true });
     }
 
+    const pendingSteps = pendingStepsFor(study.factorMix);
     const now = new Date().toISOString();
     const progress = await prisma.studyProgress.upsert({
       where: { studyId: id },
       create: {
         studyId: id,
         currentStep: 0,
-        steps: PENDING_STEPS,
+        steps: pendingSteps,
         logs: [{ ts: now, message: "回测排队中…", level: "info" }],
       },
       update: {
         currentStep: 0,
-        steps: PENDING_STEPS,
+        steps: pendingSteps,
         logs: [{ ts: now, message: "回测重启中…", level: "info" }],
         startedAt: new Date(),
       },

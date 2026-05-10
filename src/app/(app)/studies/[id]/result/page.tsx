@@ -101,6 +101,29 @@ interface ApiResult {
   rebalanceHistory?: RebalanceEntry[];
   dataQuality?: DataQuality;
   parameterSensitivity?: ParameterSensitivity | null;
+  // Phase 4 — multi-factor diagnostics, populated only for factorMix=multifactor.
+  factorCoverage?: FactorCoverage | null;
+  factorBreakdown?: FactorBreakdown | null;
+}
+
+interface FactorCoverage {
+  byField: Record<string, number>;
+  valueCoverage: number;
+  qualityCoverage: number;
+  missingTickers: string[];
+  generatedAt: string;
+}
+
+interface FactorBreakdown {
+  generatedAt: string;
+  asOfRebalance: string;
+  holdings: {
+    ticker: string;
+    value?: number;
+    quality?: number;
+    momentum?: number;
+    composite?: number;
+  }[];
 }
 
 interface SensitivityVariant {
@@ -137,6 +160,7 @@ interface ApiStudy {
   rebalance: string;
   benchmark: string;
   txCostBps: number;
+  factorMix?: string;
   result: ApiResult | null;
 }
 
@@ -990,6 +1014,167 @@ function ParameterSensitivityCard({
   );
 }
 
+const FACTOR_FIELD_LABELS: Record<string, string> = {
+  pe: "P/E",
+  pb: "P/B",
+  ps: "P/S",
+  evEbitda: "EV/EBITDA",
+  roe: "ROE",
+  roic: "ROIC",
+  grossMargin: "Gross Margin",
+  debtToEquity: "Debt/Equity",
+  revenueGrowth: "Revenue Growth",
+  epsGrowth: "EPS Growth",
+};
+
+function FactorCoverageCard({ data }: { data?: FactorCoverage | null }) {
+  if (!data) return null;
+  const fields = Object.entries(data.byField);
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">基本面字段覆盖率</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Yahoo + SEC EDGAR 合并后，每个字段在股票池中的可用率（基于当前快照）
+        </p>
+      </div>
+      <div className="px-4 py-3">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="text-xs text-gray-500">价值因子覆盖：</div>
+          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded-full"
+              style={{ width: `${Math.round(data.valueCoverage * 100)}%` }}
+            />
+          </div>
+          <div className="text-xs font-medium text-gray-700 w-10 text-right">
+            {Math.round(data.valueCoverage * 100)}%
+          </div>
+        </div>
+        <div className="flex items-center gap-3 mb-3">
+          <div className="text-xs text-gray-500">质量因子覆盖：</div>
+          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full"
+              style={{ width: `${Math.round(data.qualityCoverage * 100)}%` }}
+            />
+          </div>
+          <div className="text-xs font-medium text-gray-700 w-10 text-right">
+            {Math.round(data.qualityCoverage * 100)}%
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 mt-3 pt-3 border-t border-gray-100">
+          {fields.map(([k, v]) => (
+            <div key={k} className="flex items-center justify-between text-xs">
+              <span className="text-gray-600">
+                {FACTOR_FIELD_LABELS[k] ?? k}
+              </span>
+              <span
+                className={`font-mono ${
+                  v >= 0.9
+                    ? "text-green-700"
+                    : v >= 0.5
+                      ? "text-amber-700"
+                      : "text-red-600"
+                }`}
+              >
+                {Math.round(v * 100)}%
+              </span>
+            </div>
+          ))}
+        </div>
+        {data.missingTickers.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-500">
+            完全无数据的标的：
+            <span className="font-mono text-gray-700">
+              {data.missingTickers.join(", ")}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FactorBreakdownCard({ data }: { data?: FactorBreakdown | null }) {
+  if (!data || data.holdings.length === 0) return null;
+  const fmtZ = (z?: number) =>
+    z == null ? "—" : `${z >= 0 ? "+" : ""}${z.toFixed(2)}`;
+  const colorOf = (z?: number) => {
+    if (z == null) return "text-gray-400";
+    if (z > 0.5) return "text-green-700";
+    if (z < -0.5) return "text-red-600";
+    return "text-gray-700";
+  };
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">
+          最末次再平衡 · 持仓多因子分解
+        </h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          于 {data.asOfRebalance} 选股时各持仓的 Value / Quality / Momentum z-score 与等权合成（横截面归一）
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50/60">
+              <th className="py-2 px-3 text-xs text-gray-400 text-left font-medium">
+                标的
+              </th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">
+                Value z
+              </th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">
+                Quality z
+              </th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">
+                Momentum z
+              </th>
+              <th className="py-2 px-3 text-xs text-gray-400 text-right font-medium">
+                合成
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.holdings.map((h) => (
+              <tr
+                key={h.ticker}
+                className="border-b border-gray-100 last:border-0"
+              >
+                <td className="py-2 px-3 text-sm text-gray-900 font-mono">
+                  {h.ticker}
+                </td>
+                <td
+                  className={`py-2 px-3 text-sm text-right font-mono ${colorOf(h.value)}`}
+                >
+                  {fmtZ(h.value)}
+                </td>
+                <td
+                  className={`py-2 px-3 text-sm text-right font-mono ${colorOf(h.quality)}`}
+                >
+                  {fmtZ(h.quality)}
+                </td>
+                <td
+                  className={`py-2 px-3 text-sm text-right font-mono ${colorOf(h.momentum)}`}
+                >
+                  {fmtZ(h.momentum)}
+                </td>
+                <td
+                  className={`py-2 px-3 text-sm text-right font-semibold font-mono ${colorOf(h.composite)}`}
+                >
+                  {fmtZ(h.composite)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function ResultPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -1259,6 +1444,8 @@ export default function ResultPage() {
       {activeTab === "analysis" && (
         <div className="space-y-5">
           <FactorDiagnostics data={result.factorDiagnostics} />
+          <FactorCoverageCard data={result.factorCoverage} />
+          <FactorBreakdownCard data={result.factorBreakdown} />
           <ParameterSensitivityCard data={result.parameterSensitivity} />
           <RebalanceHistoryCard history={result.rebalanceHistory} />
         </div>

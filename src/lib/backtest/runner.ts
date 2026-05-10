@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { UNIVERSE, DEFAULT_BENCHMARK, rebalanceMonthsOf } from "./universe";
 import { fetchMonthlyPrices } from "./prices";
 import { compute121Momentum, computeMomentum } from "./factor";
+import type { FactorScores } from "./factor";
 import { runBacktest as runEngine } from "./engine";
 import type { MonthKey } from "./prices";
 import {
@@ -12,10 +13,18 @@ import {
   computeFactorDiagnostics,
   computeResultMetrics,
 } from "./metrics";
+import { getMergedSnapshotsForUniverse } from "@/lib/fundamentals/cache";
+import type { FundamentalSnapshot } from "@/lib/fundamentals/types";
+import {
+  computeCoverage,
+  computeMultiFactorScores,
+  zscoreMomentumAtMonth,
+  type FactorCoverageReport,
+} from "@/lib/factors/multifactor";
 
-// Canonical step list — single source of truth shared by the runner and the
-// running page UI (frontend reads this from progress.steps).
-export const BACKTEST_STEPS: { name: string; description: string }[] = [
+// Canonical step list for momentum-only studies. Multi-factor studies extend
+// this with an extra "拉取基本面数据" step — see stepsForFactorMix below.
+const STEPS_MOMENTUM: { name: string; description: string }[] = [
   { name: "校验参数", description: "检查股票池、日期范围和因子定义" },
   { name: "获取股票池价格", description: "从 Yahoo Finance 拉取月度调整收盘价" },
   { name: "获取基准价格", description: "拉取基准（默认 SPY）月度数据" },
@@ -29,6 +38,157 @@ export const BACKTEST_STEPS: { name: string; description: string }[] = [
   },
   { name: "汇总研究结果", description: "保存到数据库，AI 报告由结果页按需生成" },
 ];
+
+const STEPS_MULTIFACTOR: { name: string; description: string }[] = [
+  { name: "校验参数", description: "检查股票池、日期范围和因子定义" },
+  { name: "获取股票池价格", description: "从 Yahoo Finance 拉取月度调整收盘价" },
+  { name: "获取基准价格", description: "拉取基准（默认 SPY）月度数据" },
+  {
+    name: "拉取基本面数据",
+    description: "Yahoo + SEC EDGAR 混合，按 24h 缓存策略",
+  },
+  {
+    name: "计算因子得分",
+    description: "Value + Quality + Momentum 等权 z-score 合成",
+  },
+  { name: "构建投资组合", description: "按再平衡频率选 top 20% 等权" },
+  { name: "运行回测引擎", description: "月度模拟，应用单边交易成本" },
+  { name: "计算风险指标", description: "CAGR、Sharpe、Max DD、Beta、Alpha、IR" },
+  {
+    name: "敏感性扫描",
+    description: "扫描动量回看期、再平衡频率和分位桶宽度",
+  },
+  { name: "汇总研究结果", description: "保存到数据库，AI 报告由结果页按需生成" },
+];
+
+export function stepsForFactorMix(
+  mix: string,
+): { name: string; description: string }[] {
+  return mix === "multifactor" ? STEPS_MULTIFACTOR : STEPS_MOMENTUM;
+}
+
+// Phase 4: build a multi-factor FactorScores by *combining* (a) the month-
+// varying 12-1 momentum series we already compute and (b) a constant Value+
+// Quality tilt from today's Yahoo+SEC fundamentals snapshot. Result has the
+// same shape as compute121Momentum so the engine can swap it in unchanged.
+//
+// Caveat (disclosed in dataQuality): Value/Quality are point-in-NOW, not
+// point-in-time historical, so this strategy has look-ahead on fundamentals.
+// The Phase 4 spec explicitly accepts this trade-off and surfaces it in the
+// data-quality panel.
+function buildMultiFactorScores(
+  momentumScores: FactorScores,
+  fundamentals: Record<string, FundamentalSnapshot>,
+): FactorScores {
+  const tickers = Object.keys(momentumScores);
+  if (tickers.length === 0) return {};
+
+  // Cross-sectional z-score helpers — operate on a single static snapshot.
+  const fieldZ = (field: keyof FundamentalSnapshot, lowerIsBetter: boolean) => {
+    const vals: number[] = [];
+    const present = new Map<string, number>();
+    for (const t of tickers) {
+      const v = fundamentals[t]?.[field];
+      if (typeof v === "number" && Number.isFinite(v)) {
+        vals.push(v);
+        present.set(t, v);
+      }
+    }
+    if (vals.length < 2) return new Map<string, number>();
+    const mean = vals.reduce((s, x) => s + x, 0) / vals.length;
+    const std = Math.sqrt(
+      vals.reduce((s, x) => s + (x - mean) ** 2, 0) / vals.length,
+    );
+    if (std === 0) return new Map<string, number>();
+    const out = new Map<string, number>();
+    for (const [t, v] of present) {
+      const z = (v - mean) / std;
+      out.set(t, lowerIsBetter ? -z : z);
+    }
+    return out;
+  };
+
+  // Lower-is-better: PE / PB / PS / EV-EBITDA / debt-to-equity.
+  const peZ = fieldZ("pe", true);
+  const pbZ = fieldZ("pb", true);
+  const psZ = fieldZ("ps", true);
+  const evZ = fieldZ("evEbitda", true);
+  const roeZ = fieldZ("roe", false);
+  const gmZ = fieldZ("grossMargin", false);
+  const deZ = fieldZ("debtToEquity", true);
+
+  // Constant per-ticker value/quality tilt (does not vary across months).
+  const valueQualityZ = new Map<string, number>();
+  for (const t of tickers) {
+    const components: number[] = [];
+    for (const m of [peZ, pbZ, psZ, evZ]) {
+      const v = m.get(t);
+      if (v !== undefined) components.push(v);
+    }
+    for (const m of [roeZ, gmZ, deZ]) {
+      const v = m.get(t);
+      if (v !== undefined) components.push(v);
+    }
+    if (components.length > 0) {
+      valueQualityZ.set(
+        t,
+        components.reduce((s, x) => s + x, 0) / components.length,
+      );
+    }
+  }
+
+  // For each (ticker, month) pair, composite = average of (per-month momentum
+  // z-scored cross-sectionally at that month) + (static value/quality z).
+  // First, pre-compute cross-sectional momentum z-scores per month so we can
+  // mix on the same scale.
+  // Collect all months that appear in any ticker's momentum series.
+  const allMonths = new Set<MonthKey>();
+  for (const t of tickers) {
+    for (const k of momentumScores[t]?.keys() ?? []) allMonths.add(k);
+  }
+  const monthMomZ = new Map<MonthKey, Map<string, number>>();
+  for (const month of allMonths) {
+    const vals: number[] = [];
+    const present = new Map<string, number>();
+    for (const t of tickers) {
+      const v = momentumScores[t]?.get(month);
+      if (typeof v === "number" && Number.isFinite(v)) {
+        vals.push(v);
+        present.set(t, v);
+      }
+    }
+    if (vals.length < 2) continue;
+    const mean = vals.reduce((s, x) => s + x, 0) / vals.length;
+    const std = Math.sqrt(
+      vals.reduce((s, x) => s + (x - mean) ** 2, 0) / vals.length,
+    );
+    if (std === 0) continue;
+    const out = new Map<string, number>();
+    for (const [t, v] of present) out.set(t, (v - mean) / std);
+    monthMomZ.set(month, out);
+  }
+
+  const composite: FactorScores = {};
+  for (const t of tickers) {
+    const m = new Map<MonthKey, number>();
+    for (const month of allMonths) {
+      const momZ = monthMomZ.get(month)?.get(t);
+      const vqZ = valueQualityZ.get(t);
+      const components: number[] = [];
+      if (momZ !== undefined) components.push(momZ);
+      if (vqZ !== undefined) components.push(vqZ);
+      if (components.length === 0) continue;
+      m.set(month, components.reduce((s, x) => s + x, 0) / components.length);
+    }
+    composite[t] = m;
+  }
+  return composite;
+}
+
+// Phase 3 / 3.1 backwards-compat export. Existing callers read this without
+// knowing about factorMix; for the dashboard's "9 vs 10 step" total we now
+// derive from the actual stored steps.
+export const BACKTEST_STEPS = STEPS_MOMENTUM;
 
 type StepStatus = "pending" | "running" | "complete" | "error";
 
@@ -46,28 +206,31 @@ interface StoredLog {
   level: "info" | "warning" | "error";
 }
 
-const initialSteps = (): StoredStep[] =>
-  BACKTEST_STEPS.map((s) => ({
+const initialSteps = (factorMix: string): StoredStep[] =>
+  stepsForFactorMix(factorMix).map((s) => ({
     name: s.name,
     description: s.description,
     status: "pending",
   }));
 
-async function initProgress(studyId: string): Promise<void> {
+async function initProgress(
+  studyId: string,
+  factorMix: string,
+): Promise<void> {
   const now = new Date().toISOString();
   await prisma.studyProgress.upsert({
     where: { studyId },
     create: {
       studyId,
       currentStep: 0,
-      steps: initialSteps() as unknown as Prisma.InputJsonValue,
+      steps: initialSteps(factorMix) as unknown as Prisma.InputJsonValue,
       logs: [
         { ts: now, message: "回测开始", level: "info" },
       ] as unknown as Prisma.InputJsonValue,
     },
     update: {
       currentStep: 0,
-      steps: initialSteps() as unknown as Prisma.InputJsonValue,
+      steps: initialSteps(factorMix) as unknown as Prisma.InputJsonValue,
       logs: [
         { ts: now, message: "回测重启", level: "info" },
       ] as unknown as Prisma.InputJsonValue,
@@ -83,7 +246,9 @@ async function readStepsAndLogs(
     where: { studyId },
     select: { steps: true, logs: true },
   });
-  const steps = (row?.steps as unknown as StoredStep[]) ?? initialSteps();
+  // Fallback to momentum-only steps if a row somehow lacks one — only happens
+  // for in-memory tests. The real init path always populates it.
+  const steps = (row?.steps as unknown as StoredStep[]) ?? initialSteps("momentum");
   const logs = (row?.logs as unknown as StoredLog[]) ?? [];
   return { steps, logs };
 }
@@ -360,6 +525,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         benchmark: true,
         txCostBps: true,
         universe: true,
+        factorMix: true,
       },
     });
     if (!study) {
@@ -367,7 +533,12 @@ export async function runBacktest(studyId: string): Promise<void> {
       return;
     }
 
-    await initProgress(studyId);
+    const isMultiFactor = study.factorMix === "multifactor";
+    // Step indices shift by +1 starting at index 3 when multifactor is enabled
+    // (we insert "拉取基本面数据" at slot 3).
+    const stepIdx = (m: number) => (isMultiFactor && m >= 3 ? m + 1 : m);
+
+    await initProgress(studyId, study.factorMix);
     // /start route already set Study.status to RUNNING; we don't redo it here
     // so we don't accidentally overwrite a CANCELLED status set in the
     // brief window between /start and runBacktest's first await.
@@ -441,15 +612,64 @@ export async function runBacktest(studyId: string): Promise<void> {
       Math.round((Date.now() - t3) / 1000),
     );
 
+    // -------- Step 3.5 (multifactor only): fetch fundamentals --------
+    let fundamentals: Record<string, FundamentalSnapshot> = {};
+    let factorCoverage: FactorCoverageReport | undefined;
+    if (isMultiFactor) {
+      await assertNotCancelled(studyId);
+      const tFund = Date.now();
+      await setStep(
+        studyId,
+        3, // multifactor's step 3 = fundamentals
+        "running",
+        `开始拉取基本面数据（Yahoo + SEC EDGAR，${UNIVERSE.length} 个标的）`,
+      );
+      fundamentals = await getMergedSnapshotsForUniverse(
+        UNIVERSE,
+        4,
+        ({ ticker, completed, total, hasData }) => {
+          if (completed % 5 === 0 || completed === total) {
+            appendLog(
+              studyId,
+              `基本面 ${completed}/${total}（${ticker}${hasData ? "" : " 无数据"}）`,
+            ).catch(() => {});
+          }
+        },
+      );
+      factorCoverage = computeCoverage(UNIVERSE, fundamentals);
+      const covered = UNIVERSE.length - factorCoverage.missingTickers.length;
+      await setStep(
+        studyId,
+        3,
+        "complete",
+        `基本面数据拉取完成（${covered}/${UNIVERSE.length} 有数据，价值覆盖 ${Math.round(factorCoverage.valueCoverage * 100)}%、质量覆盖 ${Math.round(factorCoverage.qualityCoverage * 100)}%）`,
+        undefined,
+        Math.round((Date.now() - tFund) / 1000),
+      );
+    }
+
     // -------- Step 4: compute factor scores --------
     await assertNotCancelled(studyId);
     const t4 = Date.now();
-    await setStep(studyId, 3, "running", "计算 12-1 动量因子");
-    const scores = compute121Momentum(prices);
+    await setStep(
+      studyId,
+      stepIdx(3),
+      "running",
+      isMultiFactor
+        ? "计算多因子合成得分（Value + Quality + 12-1 Momentum 等权 z-score）"
+        : "计算 12-1 动量因子",
+    );
+    const momentumScores = compute121Momentum(prices);
+    let scores: FactorScores;
+    if (isMultiFactor) {
+      scores = buildMultiFactorScores(momentumScores, fundamentals);
+    } else {
+      scores = momentumScores;
+    }
     const totalScores = Object.values(scores).reduce((s, m) => s + m.size, 0);
     await setStep(
       studyId,
-      3,
+      stepIdx(3),
       "complete",
       `因子得分计算完成（共 ${totalScores} 个 ticker-month 信号）`,
       undefined,
@@ -462,7 +682,7 @@ export async function runBacktest(studyId: string): Promise<void> {
     // before step 6 starts, but they share the same engine call.
     await assertNotCancelled(studyId);
     const t5 = Date.now();
-    await setStep(studyId, 4, "running", "按再平衡频率构建投资组合");
+    await setStep(studyId, stepIdx(4), "running", "按再平衡频率构建投资组合");
     const path = runEngine({
       prices,
       benchmark,
@@ -479,7 +699,7 @@ export async function runBacktest(studyId: string): Promise<void> {
     }
     await setStep(
       studyId,
-      4,
+      stepIdx(4),
       "complete",
       `共 ${path.rebalances.length} 次再平衡，每次持仓 ${path.rebalances[0]?.holdings.length ?? 0} 只`,
       `${path.rebalances.length} 次再平衡`,
@@ -487,11 +707,11 @@ export async function runBacktest(studyId: string): Promise<void> {
     );
 
     const t6 = Date.now();
-    await setStep(studyId, 5, "running", `回测引擎模拟 ${path.equity.length - 1} 个月`);
+    await setStep(studyId, stepIdx(5), "running", `回测引擎模拟 ${path.equity.length - 1} 个月`);
     // engine already ran above; this step measures its share of wall-clock.
     await setStep(
       studyId,
-      5,
+      stepIdx(5),
       "complete",
       "回测完成",
       `${path.equity.length - 1} 个交易月`,
@@ -501,19 +721,23 @@ export async function runBacktest(studyId: string): Promise<void> {
     // -------- Step 7: compute metrics + factor diagnostics --------
     await assertNotCancelled(studyId);
     const t7 = Date.now();
-    await setStep(studyId, 6, "running", "计算风险指标与因子诊断");
+    await setStep(studyId, stepIdx(6), "running", "计算风险指标与因子诊断");
     const metrics = computeResultMetrics(path);
     const equityCurve = computeEquityCurve(path);
     const drawdown = computeDrawdownSeries(path);
     const annualReturns = computeAnnualReturns(path);
+    // Factor diagnostics intentionally use raw 12-1 momentum (not the multi-
+    // factor composite) — IC measurements are most interpretable on a single
+    // factor at a time. The composite is reflected separately via
+    // factorBreakdown for the latest portfolio.
     const factorDiagnostics = computeFactorDiagnostics(
-      scores,
+      momentumScores,
       prices,
       path.axis,
     );
     await setStep(
       studyId,
-      6,
+      stepIdx(6),
       "complete",
       `指标计算完成：CAGR=${metrics.strategy.cagr}%，Sharpe=${metrics.strategy.sharpe}，MaxDD=${metrics.strategy.maxDrawdown}%`,
       undefined,
@@ -525,7 +749,7 @@ export async function runBacktest(studyId: string): Promise<void> {
     const tSens = Date.now();
     await setStep(
       studyId,
-      7,
+      stepIdx(7),
       "running",
       "敏感性扫描：动量回看期、再平衡频率、分位桶宽度",
     );
@@ -544,7 +768,7 @@ export async function runBacktest(studyId: string): Promise<void> {
       });
       await setStep(
         studyId,
-        7,
+        stepIdx(7),
         "complete",
         `敏感性扫描完成（${parameterSensitivity.byLookback.length + parameterSensitivity.byRebalance.length + parameterSensitivity.byQuintile.length} 次试算）`,
         undefined,
@@ -562,7 +786,7 @@ export async function runBacktest(studyId: string): Promise<void> {
       );
       await setStep(
         studyId,
-        7,
+        stepIdx(7),
         "complete",
         "敏感性扫描跳过",
         "已记录警告",
@@ -570,10 +794,52 @@ export async function runBacktest(studyId: string): Promise<void> {
       );
     }
 
+    // Phase 4: compute multi-factor breakdown for the *latest* rebalance — gives
+    // the Result page concrete Value/Quality/Momentum component scores for the
+    // portfolio actually held at end-of-backtest. This is purely diagnostic;
+    // the engine has already run with the multi-factor composite for selection.
+    let factorBreakdown:
+      | {
+          generatedAt: string;
+          asOfRebalance: string;
+          holdings: {
+            ticker: string;
+            value?: number;
+            quality?: number;
+            momentum?: number;
+            composite?: number;
+          }[];
+        }
+      | null = null;
+    if (isMultiFactor && path.rebalances.length > 0) {
+      const lastRebalance = path.rebalances[path.rebalances.length - 1];
+      const momRaw: Record<string, number | undefined> = {};
+      for (const t of UNIVERSE) {
+        momRaw[t] = momentumScores[t]?.get(lastRebalance.date);
+      }
+      const momZ = zscoreMomentumAtMonth(momRaw);
+      const mfOut = computeMultiFactorScores({
+        tickers: UNIVERSE,
+        fundamentals,
+        momentumByTicker: momZ,
+      });
+      factorBreakdown = {
+        generatedAt: new Date().toISOString(),
+        asOfRebalance: lastRebalance.date,
+        holdings: lastRebalance.holdings.map((t) => ({
+          ticker: t,
+          value: mfOut.scores[t]?.value,
+          quality: mfOut.scores[t]?.quality,
+          momentum: mfOut.scores[t]?.momentum,
+          composite: mfOut.scores[t]?.composite,
+        })),
+      };
+    }
+
     // -------- Step 9: persist result --------
     await assertNotCancelled(studyId);
     const t8 = Date.now();
-    await setStep(studyId, 8, "running", "保存研究结果到数据库");
+    await setStep(studyId, stepIdx(8), "running", "保存研究结果到数据库");
 
     // Phase 3.1: emit monthly returns, rebalance history, and data-quality
     // metadata so the Result page can render Best/Worst Months, the rebalance
@@ -599,8 +865,12 @@ export async function runBacktest(studyId: string): Promise<void> {
       survivorshipBias: true,
       survivorshipNote:
         "因为股票池在整个回测窗口里固定，已退市/被剔除指数的标的不在样本里，回测结果存在幸存者偏差",
-      factorType: "Price-only momentum",
-      factorTypeNote: "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子",
+      factorType: isMultiFactor
+        ? "Multi-factor (Value + Quality + 12-1 Momentum)"
+        : "Price-only momentum",
+      factorTypeNote: isMultiFactor
+        ? "Value/Quality 使用 Yahoo + SEC EDGAR 当前快照（点-in-now），并非历史 PIT 数据；回测假设这些基本面在整个窗口期保持不变，存在前视偏差。Momentum 是月度滚动 12-1。"
+        : "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子",
       priceCoverage: {
         totalDataPoints: totalPoints,
         missingTickers,
@@ -631,6 +901,13 @@ export async function runBacktest(studyId: string): Promise<void> {
         parameterSensitivity === null
           ? Prisma.DbNull
           : (parameterSensitivity as unknown as Prisma.InputJsonValue),
+      // Phase 4 — both Json?, only populated for multifactor studies.
+      factorCoverage: factorCoverage
+        ? (factorCoverage as unknown as Prisma.InputJsonValue)
+        : Prisma.DbNull,
+      factorBreakdown: factorBreakdown
+        ? (factorBreakdown as unknown as Prisma.InputJsonValue)
+        : Prisma.DbNull,
     };
     await prisma.studyResult.upsert({
       where: { studyId },
@@ -643,7 +920,7 @@ export async function runBacktest(studyId: string): Promise<void> {
     });
     await setStep(
       studyId,
-      8,
+      stepIdx(8),
       "complete",
       "研究结果已保存，AI 解读将在结果页加载时按需生成",
       undefined,

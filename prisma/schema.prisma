@@ -93,6 +93,10 @@ model Study {
   tags       String[]       @default([])
   favorited  Boolean        @default(false)
   archived   Boolean        @default(false)
+  // Phase 4 — factor mix. "momentum" = legacy 12-1 only; "multifactor" =
+  // equal-weight Value + Quality + Momentum composite. Defaults to momentum
+  // so old studies and form submissions continue to work.
+  factorMix  String         @default("momentum")
   plan       StudyPlan?
   progress   StudyProgress?
   result     StudyResult?
@@ -140,7 +144,45 @@ model StudyResult {
   rebalanceHistory     Json @default("[]")
   dataQuality          Json @default("{}")
   parameterSensitivity Json?
+  // Phase 4 — multi-factor diagnostics. Null for legacy/momentum-only studies.
+  factorCoverage       Json?
+  factorBreakdown      Json?
   createdAt         DateTime @default(now())
+}
+
+// ============================================================
+// Phase 4 — fundamentals cache (Yahoo + SEC EDGAR hybrid)
+// ============================================================
+//
+// One row per (ticker, source, fiscalDate). This is a *cache* — not a study
+// artifact — so it's not scoped to userId; everyone benefits from the same
+// fetched data. Re-fetch policy is "stale after 24h" implemented in the
+// cache layer.
+model FundamentalSnapshot {
+  ticker        String
+  source        String   // "yahoo" | "sec" | "merged"
+  fiscalDate    DateTime // last reported fiscal period end (or "now" for Yahoo TTM)
+  asOf          DateTime @default(now()) // when *we* fetched/computed this row
+  reportedAt    DateTime? // for SEC: when the filing was submitted (PIT anchor)
+  // Value
+  pe            Float?
+  pb            Float?
+  ps            Float?
+  evEbitda      Float?
+  // Quality
+  roe           Float?
+  roic          Float?
+  grossMargin   Float?
+  debtToEquity  Float?
+  // Growth
+  revenueGrowth Float?
+  epsGrowth     Float?
+  // Audit / debug — original payload so we can re-derive without re-fetching.
+  raw           Json?
+
+  @@id([ticker, source, fiscalDate])
+  @@index([ticker, asOf])
+  @@index([source, asOf])
 }
 
 // Per-user per-day AI call counters for cheap rate limiting. We don't need a

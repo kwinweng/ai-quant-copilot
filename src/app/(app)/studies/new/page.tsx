@@ -25,6 +25,7 @@ interface SourceStudy {
   rebalance: string;
   benchmark: string;
   txCostBps: number;
+  factorMix?: string;
 }
 
 function NewStudyForm() {
@@ -42,6 +43,9 @@ function NewStudyForm() {
   const [slippage, setSlippage] = useState("1");
   const [maxPosition, setMaxPosition] = useState("5");
   const [longShort, setLongShort] = useState("仅做多");
+  const [factorMix, setFactorMix] = useState<"momentum" | "multifactor">(
+    "momentum",
+  );
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [cloneStatus, setCloneStatus] = useState<
@@ -70,6 +74,9 @@ function NewStudyForm() {
         setRebalance(study.rebalance ?? "季度");
         setBenchmark(study.benchmark ?? "SPY");
         setTxCost(String(study.txCostBps ?? 5));
+        if (study.factorMix === "multifactor" || study.factorMix === "momentum") {
+          setFactorMix(study.factorMix);
+        }
         setCloneStatus("loaded");
       } catch (err) {
         setCloneStatus("error");
@@ -95,6 +102,7 @@ function NewStudyForm() {
           rebalance,
           benchmark,
           txCostBps: Number(txCost) || 0,
+          factorMix,
         }),
       });
       if (!res.ok) {
@@ -264,6 +272,51 @@ function NewStudyForm() {
                   onChange={(e) => setTxCost(e.target.value)}
                 />
               </div>
+            </div>
+
+            {/* Phase 4: factor mix selector */}
+            <div className="mt-5 pt-5 border-t border-gray-100">
+              <label className={labelCls}>因子组合</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setFactorMix("momentum")}
+                  className={`text-left rounded-lg border-2 p-3 transition-colors ${
+                    factorMix === "momentum"
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 bg-white hover:border-gray-300"
+                  }`}
+                >
+                  <div className="text-sm font-medium text-gray-900">
+                    单因子：12-1 动量
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    经典 Jegadeesh-Titman 价格动量，仅用价格信息，无前视偏差
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFactorMix("multifactor")}
+                  className={`text-left rounded-lg border-2 p-3 transition-colors ${
+                    factorMix === "multifactor"
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 bg-white hover:border-gray-300"
+                  }`}
+                >
+                  <div className="text-sm font-medium text-gray-900">
+                    多因子：Value + Quality + Momentum
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Yahoo + SEC EDGAR 基本面 + 12-1 动量等权 z-score 合成。基本面数据为
+                    point-in-now，存在前视偏差
+                  </div>
+                </button>
+              </div>
+              {factorMix === "multifactor" && (
+                <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+                  ⚠ 多因子回测会拉取所有 30 个标的的基本面数据（首次约 30-60 秒，之后 24 小时内复用缓存）
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

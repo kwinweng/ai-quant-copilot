@@ -25,6 +25,7 @@ export async function GET() {
         tags: true,
         favorited: true,
         archived: true,
+        factorMix: true,
         createdAt: true,
         updatedAt: true,
         result: {
@@ -59,6 +60,7 @@ interface CreateStudyBody {
   rebalance?: string;
   benchmark?: string;
   txCostBps?: number;
+  factorMix?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -82,7 +84,12 @@ export async function POST(req: NextRequest) {
     rebalance,
     benchmark,
     txCostBps,
+    factorMix = "momentum",
   } = body;
+
+  if (factorMix !== "momentum" && factorMix !== "multifactor") {
+    return badRequest("factorMix must be 'momentum' or 'multifactor'");
+  }
 
   if (!hypothesis?.trim()) return badRequest("hypothesis is required");
   if (!universe?.trim()) return badRequest("universe is required");
@@ -117,6 +124,7 @@ export async function POST(req: NextRequest) {
         rebalance,
         benchmark,
         txCostBps,
+        factorMix,
       },
     });
     return NextResponse.json({ study }, { status: 201 });
