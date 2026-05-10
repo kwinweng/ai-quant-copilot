@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser, badRequest, serverError } from "@/lib/api";
+import { generateStudyTitle } from "@/lib/ai";
 
 export async function GET() {
   const { session, response } = await requireUser();
@@ -146,7 +147,11 @@ export async function POST(req: NextRequest) {
     return badRequest("startDate must be earlier than endDate");
   }
 
-  const derivedTitle = title?.trim() || hypothesis.trim().slice(0, 60);
+  // User-supplied title wins. Otherwise compress the hypothesis into an
+  // 8-16 char concise label via AI (with heuristic fallback). The previous
+  // implementation just sliced the first 60 chars and produced ugly mid-
+  // sentence truncations.
+  const derivedTitle = title?.trim() || (await generateStudyTitle(hypothesis));
 
   try {
     const study = await prisma.study.create({

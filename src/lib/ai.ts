@@ -622,3 +622,112 @@ export function stripCoachFinalBlock(text: string): string {
   if (idx === -1) return text;
   return text.slice(0, idx).trim();
 }
+
+// ============================================================
+// Concise study title generation
+//
+// Previously /api/studies POST took the first 60 chars of the hypothesis
+// as the title — that produced ugly truncated mid-sentence labels like
+// "美股大盘股中，综合质量因子（ROIC/ROE/毛利率）与价值因子（PE/PB/PS..."
+//
+// This helper asks DeepSeek to compress the hypothesis into 8-16 chars
+// emphasizing factor / strategy core. Falls back to a heuristic on AI
+// failure so study creation never blocks on the AI service.
+// ============================================================
+
+const TITLE_SYSTEM_PROMPT = `你是一名量化研究助理。任务：把投资假设压缩成一个 8-16 字的简体中文研究标题。
+
+## 输出要求
+- 只输出标题本身，不要引号、不要前缀、不要解释、不要标点结尾
+- 突出策略核心：因子组合 + 关键参数（如有）
+- 略去常见通用词："美股"、"策略"、"组合"、"研究"、"回测"、"基准"、"SPY"
+- 不要包含具体百分比、年限、bps 等数字细节
+- 最长 16 字，最短 8 字
+
+## 例子
+假设：美股大盘股中，过去 12 个月（跳过最近 1 月）涨幅最高的 Top 20% 标的，季度调仓后 10 年回测可跑赢 SPY 基准。
+标题：12-1 月价格动量
+
+假设：综合质量因子（ROIC/ROE/毛利率）与价值因子（PE/PB/PS）的组合策略，扣除交易成本后跑赢 SPY。
+标题：Quality + Value 多因子
+
+假设：美股大盘股中，过去 12 个月波动率最低的 Top 20% 标的，能以低风险获得不输市场的回报。
+标题：低波动率防御组合
+
+假设：高 ROIC + 低 PE 的双因子排序合成，季度调仓选 Top 20%，跑赢 SPY 5 个百分点。
+标题：高 ROIC × 低 PE 双因子
+
+假设：美股大盘股中，市净率（P/B）最低的 Top 20% 标的跑赢 SPY。
+标题：低 P/B 价值因子`;
+
+const TITLE_FALLBACK_MAX = 24; // hard cap on heuristic fallback length
+
+/**
+ * Heuristic fallback title — keyword-pattern matching when AI is unavailable.
+ * Catches the common factors so failed AI calls still produce a half-decent
+ * label. Returns a slice-of-hypothesis as last resort.
+ */
+function heuristicTitle(hypothesis: string): string {
+  const h = hypothesis.toLowerCase();
+  const has = (...needles: string[]) =>
+    needles.some((n) => h.includes(n.toLowerCase()));
+  const tags: string[] = [];
+  if (has("12-1", "12 个月", "12个月")) tags.push("12-1 动量");
+  else if (has("9-1", "9 个月")) tags.push("9-1 动量");
+  else if (has("6-1", "6 个月")) tags.push("6-1 动量");
+  else if (has("动量", "momentum")) tags.push("动量");
+  if (has("价值", "value", "pe", "pb", "ps")) tags.push("价值");
+  if (has("质量", "quality", "roe", "roic", "毛利率", "gross margin"))
+    tags.push("质量");
+  if (has("低波", "波动率最低", "low vol")) tags.push("低波动");
+  if (has("低 d", "低负债", "debt/equity", "负债权益")) tags.push("低杠杆");
+  if (has("高股息", "股息", "dividend")) tags.push("高股息");
+  if (tags.length >= 2) return `${tags.join(" + ")} 组合`;
+  if (tags.length === 1) return `${tags[0]}因子`;
+  // Last resort: trimmed slice of hypothesis up to first punctuation.
+  const cut = hypothesis.replace(/[，。、；,.;].*$/, "").trim();
+  return (cut || hypothesis).slice(0, TITLE_FALLBACK_MAX);
+}
+
+/**
+ * Compress a hypothesis into an 8-16 char study title via DeepSeek.
+ * Never throws — falls back to a heuristic on failure.
+ *
+ * Bills against the user's plan quota (single AI call, lightweight).
+ */
+export async function generateStudyTitle(hypothesis: string): Promise<string> {
+  const trimmed = hypothesis.trim();
+  if (trimmed.length === 0) return "未命名研究";
+  // If hypothesis is already short enough to use as-is, skip the AI call.
+  if (trimmed.length <= 18) return trimmed;
+
+  try {
+    const client = getClient();
+    const response = await client.chat.completions.create({
+      model: MODEL,
+      max_tokens: 60,
+      temperature: 0.3, // low temp = deterministic, same hypothesis → same title
+      messages: [
+        { role: "system", content: TITLE_SYSTEM_PROMPT },
+        { role: "user", content: `假设：${trimmed}\n标题：` },
+      ],
+    });
+    const raw = response.choices[0]?.message?.content?.trim() ?? "";
+    // Defensive cleanup: strip trailing punctuation, quotes, "标题：" prefix.
+    const cleaned = raw
+      .replace(/^["「『'《标题：:\s]+/u, "")
+      .replace(/["」』'》。.，,；;:\s]+$/u, "")
+      .trim();
+    // Sanity bounds: 4-24 chars. Anything wildly outside falls back.
+    if (cleaned.length >= 4 && cleaned.length <= 24) {
+      return cleaned;
+    }
+    return heuristicTitle(trimmed);
+  } catch (err) {
+    console.warn(
+      "[ai] generateStudyTitle failed, using heuristic:",
+      err instanceof Error ? err.message : err,
+    );
+    return heuristicTitle(trimmed);
+  }
+}
