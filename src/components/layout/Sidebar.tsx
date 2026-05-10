@@ -3,11 +3,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Plus, Database, LogOut } from "lucide-react";
+import { LayoutDashboard, Plus, GitCompare, Database, LogOut } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "仪表盘", icon: LayoutDashboard, exact: true },
   { href: "/studies/new", label: "新研究", icon: Plus, exact: true },
+  { href: "/studies/compare", label: "对比", icon: GitCompare, exact: false },
   { href: "/data-sources", label: "数据源", icon: Database, exact: false },
 ];
 

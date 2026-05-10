@@ -22,6 +22,9 @@ export async function GET() {
         benchmark: true,
         txCostBps: true,
         status: true,
+        tags: true,
+        favorited: true,
+        archived: true,
         createdAt: true,
         updatedAt: true,
         result: {

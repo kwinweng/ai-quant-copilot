@@ -89,6 +89,10 @@ model Study {
   benchmark  String
   txCostBps  Int
   status     StudyStatus    @default(DRAFT)
+  // Phase 3.2 — experiment management. Defaults preserve old rows.
+  tags       String[]       @default([])
+  favorited  Boolean        @default(false)
+  archived   Boolean        @default(false)
   plan       StudyPlan?
   progress   StudyProgress?
   result     StudyResult?
@@ -96,6 +100,8 @@ model Study {
   updatedAt  DateTime       @updatedAt
 
   @@index([userId, createdAt])
+  @@index([userId, archived])
+  @@index([userId, favorited])
 }
 
 model StudyPlan {
