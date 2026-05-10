@@ -95,60 +95,71 @@ async function writeCached(snap: FundamentalSnapshot): Promise<void> {
 /**
  * Get a merged Yahoo+SEC snapshot for a ticker, using cache when fresh.
  * Never throws — returns undefined if both providers come back empty.
+ *
+ * Phase 4 follow-up C5: parallel calls for the same ticker share a single
+ * in-flight Promise to avoid two simultaneous Yahoo+SEC fetches.
  */
 export async function getMergedSnapshot(
   ticker: string,
 ): Promise<FundamentalSnapshot | undefined> {
-  const [yahooRow, secRow] = await Promise.all([
-    prisma.fundamentalSnapshot.findFirst({
-      where: { ticker, source: "yahoo" },
-      orderBy: { asOf: "desc" },
-    }),
-    prisma.fundamentalSnapshot.findFirst({
-      where: { ticker, source: "sec" },
-      orderBy: { asOf: "desc" },
-    }),
-  ]);
+  const existing = inflightMergedSnapshot.get(ticker);
+  if (existing) return existing;
+  const p = (async () => {
+    const [yahooRow, secRow] = await Promise.all([
+      prisma.fundamentalSnapshot.findFirst({
+        where: { ticker, source: "yahoo" },
+        orderBy: { asOf: "desc" },
+      }),
+      prisma.fundamentalSnapshot.findFirst({
+        where: { ticker, source: "sec" },
+        orderBy: { asOf: "desc" },
+      }),
+    ]);
 
-  const needYahoo = !yahooRow || !isFresh(yahooRow.asOf);
-  const needSec = !secRow || !isFresh(secRow.asOf);
+    const needYahoo = !yahooRow || !isFresh(yahooRow.asOf);
+    const needSec = !secRow || !isFresh(secRow.asOf);
 
-  const [yahooSnap, secSnap] = await Promise.all([
-    needYahoo
-      ? yahoo.fetch(ticker).then(async (s) => {
-          if (s) {
-            try {
-              await writeCached(s);
-            } catch (err) {
-              console.warn(
-                `[fundamentals/cache] persist yahoo ${ticker} failed:`,
-                err instanceof Error ? err.message : err,
-              );
+    const [yahooSnap, secSnap] = await Promise.all([
+      needYahoo
+        ? yahoo.fetch(ticker).then(async (s) => {
+            if (s) {
+              try {
+                await writeCached(s);
+              } catch (err) {
+                console.warn(
+                  `[fundamentals/cache] persist yahoo ${ticker} failed:`,
+                  err instanceof Error ? err.message : err,
+                );
+              }
+              return s;
             }
-            return s;
-          }
-          return yahooRow ? rowToSnapshot(yahooRow) : undefined;
-        })
-      : Promise.resolve(rowToSnapshot(yahooRow!)),
-    needSec
-      ? sec.fetch(ticker).then(async (s) => {
-          if (s) {
-            try {
-              await writeCached(s);
-            } catch (err) {
-              console.warn(
-                `[fundamentals/cache] persist sec ${ticker} failed:`,
-                err instanceof Error ? err.message : err,
-              );
+            return yahooRow ? rowToSnapshot(yahooRow) : undefined;
+          })
+        : Promise.resolve(rowToSnapshot(yahooRow!)),
+      needSec
+        ? sec.fetch(ticker).then(async (s) => {
+            if (s) {
+              try {
+                await writeCached(s);
+              } catch (err) {
+                console.warn(
+                  `[fundamentals/cache] persist sec ${ticker} failed:`,
+                  err instanceof Error ? err.message : err,
+                );
+              }
+              return s;
             }
-            return s;
-          }
-          return secRow ? rowToSnapshot(secRow) : undefined;
-        })
-      : Promise.resolve(rowToSnapshot(secRow!)),
-  ]);
+            return secRow ? rowToSnapshot(secRow) : undefined;
+          })
+        : Promise.resolve(rowToSnapshot(secRow!)),
+    ]);
 
-  return mergeFundamentals(yahooSnap, secSnap);
+    return mergeFundamentals(yahooSnap, secSnap);
+  })().finally(() => {
+    inflightMergedSnapshot.delete(ticker);
+  });
+  inflightMergedSnapshot.set(ticker, p);
+  return p;
 }
 
 // =====================================================================
@@ -182,6 +193,29 @@ async function refreshSecHistory(ticker: string): Promise<FundamentalSnapshot[]>
   return fresh;
 }
 
+// Phase 4 follow-up C5: in-flight dedup for SEC + Yahoo refreshes.
+//
+// Without this, two concurrent users (or one user + SWR background poll)
+// who both find the same ticker stale will each fire their own SEC fetch.
+// SEC throttles aggressive callers and a small cluster of users could
+// trip a 429 / IP block. We coalesce parallel refresh calls into a single
+// in-flight Promise that everyone awaits.
+const inflightSecHistory = new Map<string, Promise<FundamentalSnapshot[]>>();
+const inflightMergedSnapshot = new Map<
+  string,
+  Promise<FundamentalSnapshot | undefined>
+>();
+
+function dedupedSecHistory(ticker: string): Promise<FundamentalSnapshot[]> {
+  const existing = inflightSecHistory.get(ticker);
+  if (existing) return existing;
+  const p = refreshSecHistory(ticker).finally(() => {
+    inflightSecHistory.delete(ticker);
+  });
+  inflightSecHistory.set(ticker, p);
+  return p;
+}
+
 /**
  * Get the full SEC filing history for a single ticker, refreshing the cache
  * when the latest stored row is older than CACHE_TTL_HOURS. Sorted oldest-
@@ -198,8 +232,8 @@ export async function getSecHistory(
   if (newest && isFresh(newest.asOf)) {
     return rows.map(rowToSnapshot);
   }
-  // Stale or empty → refresh.
-  const fresh = await refreshSecHistory(ticker);
+  // Stale or empty → refresh (deduped per ticker).
+  const fresh = await dedupedSecHistory(ticker);
   if (fresh.length > 0) return fresh;
   // If refresh failed (network) but we have stale rows, return them — better
   // than nothing. The data quality panel will surface staleness via asOf.

@@ -84,15 +84,29 @@ export function stepsForFactorMix(
 const REPORTING_LAG_DAYS = 90;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// Phase 4 follow-up C1: align cutoff with engine semantics.
+//
+// The engine's loop uses scores[t][decisionMonth] to choose holdings, then
+// holds through performanceMonth = decisionMonth + 1. compute121Momentum
+// builds scores[t][M] from price[M-1] / price[M-12] − 1 (skip-1), so the
+// score at M is fully knowable at end-of-M-1 / start-of-M.
+//
+// Concretely: at decisionMonth M, the strategy is acting at the END of M
+// (immediately before performanceMonth begins). At that moment, every
+// filing with `filed ≤ end-of-M` is visible. Apply the reporting lag on
+// top of that to model "filings filed >= lag days ago are visible".
+//
+// end-of-M is the same instant as start-of-(M+1), so:
+//   cutoff = start-of-(M+1) − lagDays
+//
+// The previous implementation accidentally placed the cutoff at end-of-M-1,
+// making PIT one month too strict in every backtest month.
 function monthKeyToCutoff(month: MonthKey, lagDays: number): Date {
-  // We treat the strategy as deciding at the end of the prior month for that
-  // month's portfolio (the engine's "decision month"). So as-of date is the
-  // last day of the prior month, minus reporting lag.
   const [y, m] = month.split("-").map(Number);
-  // Last day of (y, m-1) → first day of (y, m) - 1ms
-  const monthStart = new Date(Date.UTC(y, m - 1, 1));
-  const decisionEnd = new Date(monthStart.getTime() - 1);
-  return new Date(decisionEnd.getTime() - lagDays * MS_PER_DAY);
+  // Date.UTC's month arg is 0-indexed; passing m (which is 1-indexed in our
+  // MonthKey) yields the start of M+1.
+  const nextMonthStart = Date.UTC(y, m, 1);
+  return new Date(nextMonthStart - lagDays * MS_PER_DAY);
 }
 
 function pickSnapshotAsOf(

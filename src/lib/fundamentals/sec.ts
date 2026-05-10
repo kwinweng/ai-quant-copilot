@@ -266,17 +266,27 @@ export class SecEdgarProvider implements FundamentalsProvider {
       }
     }
 
-    // Use the latest fiscal end + filed timestamp we encountered as the
-    // canonical "as-of" anchors. Prefer netIncome's filing because it's the
-    // most consistently reported.
-    const anchor =
-      netIncome ?? revenues ?? stockholdersEquity
-        ? netIncome ?? revenues
+    // Phase 4 follow-up C3: pick a canonical "as-of" anchor for fiscalDate
+    // and reportedAt. The previous code had a truthy bug: when only
+    // stockholdersEquity was present (netIncome and revenues both undefined),
+    // it still entered the truthy branch but returned `undefined` from the
+    // ternary, leaving fiscalDate set to "today" — which would wrongly key
+    // a brand-new cache row each time we re-read.
+    //
+    // ttm() returns { value, endDate, filed }; latestAnnual() returns a raw
+    // FactPoint with { end, filed }. Different shapes — handle each.
+    let fiscalDate = new Date();
+    let reportedAt: Date | undefined;
+    const ttmAnchor = netIncome ?? revenues;
+    if (ttmAnchor) {
+      fiscalDate = new Date(ttmAnchor.endDate);
+      reportedAt = ttmAnchor.filed ? new Date(ttmAnchor.filed) : undefined;
+    } else if (stockholdersEquity) {
+      fiscalDate = new Date(stockholdersEquity.end);
+      reportedAt = stockholdersEquity.filed
+        ? new Date(stockholdersEquity.filed)
         : undefined;
-    const fiscalDate = anchor
-      ? new Date(anchor.endDate ?? anchor.endDate)
-      : new Date();
-    const reportedAt = anchor?.filed ? new Date(anchor.filed) : undefined;
+    }
 
     return {
       ticker,
@@ -434,19 +444,22 @@ export class SecEdgarProvider implements FundamentalsProvider {
 
       // YoY growth — needs the prior fiscal-end, if we have it.
       let revenueGrowth: number | undefined;
-      let epsGrowth: number | undefined;
+      // Phase 4 follow-up C4: epsGrowth is intentionally disabled in the
+      // historical path. SEC stores EPS as the per-share value reported in
+      // each filing — values from pre-split 10-Ks are NOT restated when a
+      // company splits stock (think NVDA 10-for-1 in 2024, AAPL 7-for-1 in
+      // 2014). A naïve YoY ratio across a split year produces garbage like
+      // "+900% earnings growth". Re-introduce only after we plumb
+      // CommonStockSharesOutstanding to derive split-adjusted EPS, or
+      // substitute NetIncome growth (which is dollar-denominated and
+      // immune to splits).
+      const epsGrowth: number | undefined = undefined;
       if (i > 0) {
         const prev = sortedEnds[i - 1];
         const prevRev = revenues.get(prev);
         if (rev && prevRev && prevRev.val > 0) {
           revenueGrowth =
             Math.round(((rev.val - prevRev.val) / prevRev.val) * 1000) / 10;
-        }
-        const eps = epsAnnual.get(fy);
-        const prevEps = epsAnnual.get(prev);
-        if (eps && prevEps && Math.abs(prevEps.val) > 0.01) {
-          epsGrowth =
-            Math.round(((eps.val - prevEps.val) / Math.abs(prevEps.val)) * 1000) / 10;
         }
       }
 
