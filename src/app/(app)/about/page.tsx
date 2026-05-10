@@ -40,6 +40,21 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "PWA · iOS 主屏 App",
+    date: "2026-05-10",
+    title: "iOS / Android 添加到主屏幕原生体验",
+    summary:
+      "Safari 添加到主屏幕后以蓝色折线品牌图标显示，开启「作为网页 App 打开」后无浏览器 chrome 全屏运行；同步修复了「关于」入口在移动端被误隐藏的问题。",
+    highlights: [
+      "新增 /apple-icon（180×180 PNG）、/icon（32×32 PNG）、/manifest.webmanifest 三个动态路由",
+      "Logo 设计：蓝色渐变方块 + 白色上升折线 + 右上角光芒，60×60 显示尺寸下仍清晰",
+      "layout.tsx 加 appleWebApp / themeColor / Viewport 元数据，iOS 状态栏与品牌色融合",
+      "middleware 把 /icon / /apple-icon / /manifest.webmanifest 加入 public 路径，未登录用户也能拉取（否则 iOS 显示字母 A 兜底）",
+      "移动 tab bar 把「关于」加回（替换数据源，因数据源页是演示），桌面侧边栏不变",
+    ],
+    badge: { label: "feature", tone: "feature" },
+  },
+  {
     version: "Sprint #6 · 评审 backlog 收尾",
     date: "2026-05-10",
     title: "MEDIUM 5 项 + UI 微调 3 项全部清掉",
@@ -371,11 +386,13 @@ function UsageGuide() {
         </p>
         <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
           <FeatureChip>真实回测（Yahoo Finance 价格）</FeatureChip>
+          <FeatureChip>AI 假设教练（3-12 轮对话）</FeatureChip>
           <FeatureChip>AI 计划与解读（DeepSeek）</FeatureChip>
-          <FeatureChip>多因子（Yahoo + SEC）</FeatureChip>
+          <FeatureChip>混合 PIT 多因子（Yahoo + SEC）</FeatureChip>
           <FeatureChip>实验管理（标签 / 收藏 / 归档）</FeatureChip>
           <FeatureChip>研究对比（指标 + 曲线叠加）</FeatureChip>
           <FeatureChip>Markdown 导出</FeatureChip>
+          <FeatureChip>iOS 主屏 App（添加到主屏幕）</FeatureChip>
         </div>
         <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -396,13 +413,13 @@ function UsageGuide() {
             title="新建研究"
             body={
               <>
-                进入「新研究」，写一句投资假设（例如「价值 + 质量因子组合在大市值美股上长期跑赢 SPY」），选股票池、回测区间、再平衡频率、基准、交易成本。
+                进入「新研究」，写一句投资假设（例如「价值 + 质量因子组合在大市值美股上长期跑赢 SPY」），选股票池、回测区间、再平衡频率、基准、交易成本，以及「因子组合」（动量单因子 vs Value+Quality+Momentum 多因子）。
                 <span className="block mt-1.5 text-blue-700">
-                  Phase 4 起还能选「因子组合」：动量单因子 vs Value+Quality+Momentum 多因子。
+                  写不出假设？走「AI 教练」入口——3-12 轮对话帮你把模糊想法整理成完整可回测的假设，或直接从 28 条分级例子里挑一条预填表单。
                 </span>
               </>
             }
-            link={{ href: "/studies/new", label: "开始" }}
+            link={{ href: "/studies/coach", label: "AI 教练" }}
           />
           <Step
             n={2}
@@ -417,7 +434,7 @@ function UsageGuide() {
           <Step
             n={4}
             title="读报告"
-            body="结果页四个 tab——总览（AI 结论 + 数据质量 + 月度极值）、指标（年度收益 + 详细指标）、图表（权益 + 回撤 + 年度）、分析（因子诊断 + 因子覆盖 + 持仓多因子分解 + 参数敏感性 + 再平衡历史）。"
+            body="结果页四个 tab——概览（AI 结论 + 数据质量 + 唯一指标表 + 月度极值）、表现（权益曲线 + 回撤 + 年度收益图与表）、持仓（最末次再平衡的多因子分解 + 历史调仓记录）、分析（因子 IC 诊断 + 基本面字段覆盖率 + 参数敏感性扫描）。"
           />
           <Step
             n={5}
@@ -445,7 +462,7 @@ function UsageGuide() {
           <Tip
             icon={<Archive className="h-3.5 w-3.5" />}
             title="归档"
-            body="不再活跃但有保留价值的研究归档隐藏，「已归档」视图找回。"
+            body="不再活跃但有保留价值的研究归档隐藏，「仅归档」视图找回，或切到「全部」一并查看。"
           />
           <Tip
             icon={<Tag className="h-3.5 w-3.5" />}
@@ -471,20 +488,20 @@ function UsageGuide() {
       >
         <div className="space-y-2 text-sm">
           <TabRow
-            label="总览"
-            body="数据质量与偏差面板（始终在顶部）→ AI 结论 + 关键指标卡 → 最佳 / 最差 5 个月份。这一页的目的是 30 秒判断「这个策略有没有意思」。"
+            label="概览"
+            body="数据质量与偏差面板（始终在顶部）→ AI 结论 + 唯一一张完整指标表（CAGR / Sharpe / Max DD / Calmar / 年化波动率 / Beta / Alpha / IR / 月度胜率 / 年化换手率）+ 权益与回撤缩略图 → 最佳 / 最差 5 个月份。这一页的目的是 30 秒判断「这个策略有没有意思」。"
           />
           <TabRow
-            label="指标"
-            body="年度收益对比图 + 明细表 + 月度极值表 + 完整指标表（CAGR / Sharpe / Max DD / Calmar / 年化波动率 / Beta / Alpha / IR / 月度胜率 / 年化换手率）。"
+            label="表现"
+            body="大尺寸权益曲线 + 回撤曲线 + 年度收益柱状图 + 年度收益明细表（含相对基准的超额）。Hover 查看月度数值。"
           />
           <TabRow
-            label="图表"
-            body="权益曲线 + 回撤序列。Hover 查看月度数值。"
+            label="持仓"
+            body="多因子模式下的最末次再平衡持仓 V/Q/M z-score 分解（按色阶高亮强弱）→ 完整再平衡历史（每次调仓的持仓清单 + 单边换手 + 交易成本影响）。"
           />
           <TabRow
             label="分析"
-            body="因子 IC 诊断 → 基本面字段覆盖率（多因子模式）→ 最末次再平衡持仓的 V/Q/M z-score 分解（多因子模式）→ 参数敏感性扫描（6/9/12 动量、月/季再平衡、Top 10/20/30%）→ 再平衡历史。"
+            body="因子 IC 诊断 → 基本面字段覆盖率（多因子模式下显示每个 Value/Quality 字段在股票池中的可用率）→ 参数敏感性扫描（6/9/12 动量回看期、月/季再平衡、Top 10/20/30% 桶宽度）。"
           />
         </div>
       </Section>
@@ -541,6 +558,11 @@ function UsageGuide() {
       >
         <ul className="space-y-2 text-sm text-gray-700 list-disc pl-5">
           <li>
+            <span className="font-medium">先用 AI 教练再写参数</span>{" "}
+            <Sparkles className="inline h-3 w-3 align-text-bottom text-blue-600" />
+            ：第一次做研究的话，从 AI 教练入口走一遍，比直接面对空白表单容易得多。教练完成后表单自动预填，你只要确认参数即可。
+          </li>
+          <li>
             <span className="font-medium">复制并修改</span>{" "}
             <Copy className="inline h-3 w-3 align-text-bottom" />
             ：不要从零写新研究——基于一个已有研究做参数变化，比较容易判断改动是否有效。
@@ -558,6 +580,9 @@ function UsageGuide() {
           </li>
           <li>
             <span className="font-medium">用标签管 Sprint</span>：给同一组实验打同一个标签（如「2026-q2-momentum」），方便事后回顾整个研究 Sprint 的轨迹。
+          </li>
+          <li>
+            <span className="font-medium">添加到 iOS 主屏</span>：Safari 打开主域 → 分享按钮 → 「添加到主屏幕」，开启「作为网页 App 打开」即可全屏运行。建议手机端常用——回测进度推送看起来更像原生 App。
           </li>
         </ul>
       </Section>
