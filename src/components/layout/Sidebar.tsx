@@ -149,18 +149,55 @@ const MOBILE_NAV_HREFS = new Set([
   "/about",
 ]);
 
+// Highlight "新研究" as the primary CTA in the mobile bar — iOS-style
+// floating-action-button pattern (circular blue, slightly elevated above
+// the bar). Keeps `flex-1` slot allocation so neighbors stay evenly spaced.
+const PRIMARY_CTA_HREF = "/studies/new";
+
 export function MobileTabBar() {
   const pathname = usePathname();
   const mobileItems = navItems.filter((item) => MOBILE_NAV_HREFS.has(item.href));
 
   return (
     <nav
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-20 bg-white border-t border-gray-200 flex"
+      className="lg:hidden fixed bottom-0 left-0 right-0 z-20 bg-white border-t border-gray-200 flex items-stretch"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       {mobileItems.map((item) => {
         const Icon = item.icon;
         const active = isActive(pathname, item.href, item.exact);
+        const isPrimary = item.href === PRIMARY_CTA_HREF;
+
+        if (isPrimary) {
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-label={item.label}
+              className="flex-1 flex flex-col items-center justify-end gap-1 pb-1.5 relative"
+            >
+              <span
+                className={cn(
+                  "inline-flex h-12 w-12 items-center justify-center rounded-full shadow-md ring-4 ring-white -mt-5 transition-colors",
+                  active
+                    ? "bg-blue-700 text-white"
+                    : "bg-blue-600 text-white hover:bg-blue-700",
+                )}
+              >
+                <Icon className="h-6 w-6" strokeWidth={2.5} />
+              </span>
+              <span
+                className={cn(
+                  "text-[10px] font-medium leading-none",
+                  active ? "text-blue-700" : "text-gray-500",
+                )}
+              >
+                {item.label}
+              </span>
+            </Link>
+          );
+        }
+
         return (
           <Link
             key={item.href}
