@@ -1,36 +1,40 @@
 # AI Quant Copilot — Development Review
 
-> 给 CodeX 的开发回顾 + 下一步建议征询。本文档基于 2026-05-08 ~ 2026-05-10 三天迭代后的真实代码库。
+> 给 CodeX 的开发回顾 + 下一步建议征询。本文档基于 2026-05-08 ~ 2026-05-11 四天迭代后的真实代码库（已上线 Phase 10）。
 
 ---
 
 ## TL;DR
 
-**AI Quant Copilot** 是一个面向个人研究者的美股量化研究 SaaS，三天内从 mock 原型迭代到生产可用，覆盖：
+**AI Quant Copilot** 是一个面向个人研究者的美股量化研究 SaaS，目标演化路径：
 
-> 「投资假设 → AI 生成研究计划 → 真实 Yahoo + SEC 回测（含混合 PIT 多因子）→ 4-tab 报告 → 实验管理 + 双研究对比 + Markdown 导出」
+> 「投资假设 → AI 教练协助产出 → AI 生成研究计划 → 真实 Yahoo + SEC 全 PIT 多因子回测（含真实成本 + Bootstrap CI + OLS 多基准归因）→ 4-tab 报告 → 一键转 Paper 组合持续追踪」
 
-生产环境：[https://aiquant.kwinweng.com](https://aiquant.kwinweng.com)（DigitalOcean Singapore，Ubuntu + PM2 + Nginx 自托管）
+生产环境：[https://aiquant.kwinweng.com](https://aiquant.kwinweng.com)（DigitalOcean Singapore，Ubuntu + PM2 + Nginx 自托管）。
 
-仓库：单 monorepo，Next.js 15 App Router + TypeScript + Prisma 6 + PostgreSQL 14。
+仓库：单 monorepo，Next.js 15 App Router + TypeScript + Prisma 6 + PostgreSQL 14 + Vitest（**143 个单测，全过**）。
 
-迭代过程已经过两轮独立评审（代码 + UI），评审发现的 36 项问题（5 CRITICAL + 6 HIGH + 5 MEDIUM + 7 重大 UI + 8 显著 UI + 5 微调）**已全部修复并部署**。
+迭代过程：
+- 已上线 **Phase 1 → Phase 10 + 7 个 Sprint**（共 ~30 个 commit/批次）。
+- 已经过两轮独立评审（代码 + UI），评审发现的 36 项问题全部修复。
+- 用户长期目标从「学习工具」演进为「**实盘参考工具**」，Phase 5-10 是为这个目标做的产品化升级。
 
 ---
 
 ## 产品形态
 
 ### 是什么
-- **核心循环**：写一句假设（或用 AI 教练对话生成）→ AI 出研究计划 → 跑真回测（10 步流水线，可取消）→ 看 4-tab 报告 → 复制变体 / 对比研究 / 导出 Markdown
-- **量化能力**：30 只大市值美股 + Yahoo Finance 月度价格 + SEC EDGAR XBRL 历史 10-K filings + DeepSeek V3-0324
-- **支持因子**：12-1 价格动量（单因子）、Value+Quality+Momentum 等权（多因子，混合 PIT）
-- **回测引擎**：自研，月度 axis，季度/月度调仓，单边交易成本，Top 分位等权
+- **核心循环**：写一句假设（或用 AI 教练 3-12 轮对话生成）→ AI 出研究计划 → 跑真回测（10 步流水线，可取消）→ 看 4-tab 报告 → 复制变体 / 对比研究 / 导出 Markdown / **转 Paper 组合追踪实际表现**
+- **量化能力**：60 只大市值美股 + 8 GICS 板块 + Yahoo Finance 月度价格 + SEC EDGAR XBRL 全历史 10-K filings + DeepSeek V3-0324
+- **支持因子**：12-1 价格动量（单因子）、Value+Quality+Momentum 等权（**全 PIT 多因子**）
+- **真实成本模型**：分层流动性（mega/large/mid: 1/4/10 bps spread）+ √turnover×5bps 市场冲击 + 用户佣金
+- **鲁棒性输出**：每个研究自动跑 Bootstrap 95% CI（1000 次重抽样）+ 70/30 OOS 拆分 + 5 ETF OLS 因子归因（SPY/QQQ/IWM/MTUM/IUSV）
 
 ### 不是什么（明确边界）
 - 不是炒股软件 / 券商终端 / 社交跟单 / 投资建议
-- 不连接富途 / Bloomberg / 任何券商 API
-- 不做实盘交易、不做期权 / 期货、不做日内
-- 不是机构级 PIT（Yahoo Value 因子仍是 point-in-now，已显式披露）
+- 不连接券商 API、不自动下单
+- 不做期权 / 期货 / 日内 / 高频
+- Paper trading 只是模拟跟踪，不涉及真实交易
 
 ---
 
@@ -39,14 +43,15 @@
 | 层 | 选型 | 理由 |
 |---|---|---|
 | 前端框架 | Next.js 15 App Router + React 19 + TypeScript | App Router 自动 metadata、ImageResponse 生成 PWA 图标 |
-| 样式 | Tailwind CSS 4 + shadcn/ui (3 components) | shadcn 用 Card/Button/Progress 三个原子件，其余手写 |
+| 样式 | Tailwind CSS 4 + shadcn/ui | 三个原始件浅色默认（U1 修复），其余手写 |
 | 图表 | Recharts | LineChart / BarChart / AreaChart |
-| 数据请求 | SWR 客户端 + Server Components for SSR | 5s 轮询 dashboard，详情页按需 |
-| 数据库 | PostgreSQL 14 + Prisma 6 | JSON 列存复杂结果（metrics, equityCurve）|
-| 认证 | NextAuth v5 + GitHub OAuth + JWT session | JWT 是为了避开 middleware 重定向死循环 |
-| 价格数据 | yahoo-finance2 SDK（v2+）| `chart()` 月度，`quoteSummary()` 当前快照基本面 |
-| 基本面（PIT 历史）| 直接 fetch SEC EDGAR XBRL companyfacts API | 30 标的 CIK 硬编码 + 远程 fallback |
-| LLM | DeepSeek API (deepseek-chat = V3-0324)，OpenAI SDK 协议 | 比 Claude 便宜 ~95%，生成速度可接受 |
+| 数据请求 | SWR 客户端 + Server Components | 5s 轮询 dashboard，详情页按需 |
+| 数据库 | PostgreSQL 14 + Prisma 6 | JSON 列存复杂结果（metrics, equityCurve, robustness, attribution）|
+| 认证 | NextAuth v5 + GitHub OAuth + JWT session | JWT 避开中间件重定向死循环 |
+| 价格数据 | yahoo-finance2 SDK | `chart()` 月度，`quoteSummary()` 当前快照基本面 + marketCap |
+| 基本面（PIT 历史）| 直接 fetch SEC EDGAR XBRL companyfacts API | 60 标的 CIK 硬编码 + 远程 fallback |
+| LLM | DeepSeek V3-0324（OpenAI SDK 协议）| 成本 ~$0.14/1M tokens，比 Claude 便宜 ~95% |
+| 测试 | Vitest 4 | 143 单测，~300ms 全跑完 |
 | 部署 | DigitalOcean droplet + PM2 + Nginx + Let's Encrypt | self-hosted，月费 ~$6 |
 
 ---
@@ -56,279 +61,222 @@
 ```
 src/
   app/
-    (app)/              # 受 NextAuth middleware 保护的路由
-      page.tsx              # 仪表盘
+    (app)/                            # NextAuth middleware 保护的路由
+      page.tsx                          # 仪表盘
       studies/
-        new/page.tsx        # 新研究表单（含 ?cloneFrom / ?coachData / ?hypothesis 预填）
-        coach/page.tsx      # AI 假设教练（流式对话 + 28 例子库）
+        new/page.tsx                    # 新研究表单（?cloneFrom / ?coachData / ?hypothesis）
+        coach/page.tsx                  # AI 假设教练（流式对话 + 28 例子库）
         [id]/
-          plan/page.tsx     # AI 研究计划确认（SSE 流式）
-          running/page.tsx  # 实时回测进度（10 步流水线）
-          result/page.tsx   # 4-tab 报告（概览/表现/持仓/分析）
-        compare/page.tsx    # 双研究对比
-      data-sources/page.tsx # 数据源页（含演示横幅 + 真实状态）
-      about/page.tsx        # 关于（使用说明 + changelog）
-      layout.tsx            # 应用 layout，已加 PWA viewport meta
+          plan/page.tsx                 # AI 研究计划确认（SSE 流式）
+          running/page.tsx              # 实时回测进度（10 步流水线）
+          result/page.tsx               # 4-tab 报告 + 全部 Phase 5-10 卡片
+        compare/page.tsx                # 双研究对比
+      paper/page.tsx                    # ★ Phase 10: Paper 组合列表 + 实时估值
+      data-sources/page.tsx
+      about/page.tsx                    # 含 changelog（每个 phase 一条）
+      layout.tsx                        # 应用 layout + PWA viewport meta
     api/
-      auth/[...nextauth]/   # NextAuth handlers
+      auth/[...nextauth]/
       studies/
-        route.ts            # GET (slim metrics) + POST (AI title)
+        route.ts                        # GET (slim metrics) + POST (AI title)
         [id]/
-          route.ts          # GET / PATCH (tags/favorite/archive) / DELETE
-          start/route.ts    # 启动回测（atomic claim）
-          cancel/route.ts   # 取消（atomic claim）
-          plan/route.ts     # 读取 plan
-          plan/generate/route.ts   # SSE 流式生成
-          progress/route.ts # 进度查询
-          result/route.ts   # 完整结果
-          result/conclusion/route.ts  # AI 结论生成
-      coach/turn/route.ts   # AI 教练 SSE 单轮
+          route.ts                      # GET / PATCH / DELETE
+          start/route.ts                # 启动回测（atomic claim）
+          cancel/route.ts               # 取消（atomic claim）
+          plan/generate/route.ts        # SSE 流式
+          progress/route.ts
+          result/route.ts
+          result/conclusion/route.ts
+      coach/turn/route.ts               # AI 教练 SSE
+      paper/                            # ★ Phase 10
+        route.ts                        # GET 列表 + POST 创建
+        [id]/value/route.ts             # GET 实时估值 + DELETE 归档
     icon.tsx + apple-icon.tsx + manifest.ts  # PWA dynamic routes
 
   lib/
     backtest/
-      engine.ts             # 自研回测引擎（月度 axis + 月/季调仓 + 交易成本）
-      runner.ts             # 编排器：10 步流水线 + 多因子模式
-      factor.ts             # 12-1 momentum + 通用 momentum
-      prices.ts             # Yahoo monthly fetch + cache
-      metrics.ts            # CAGR / Sharpe / Max DD / Calmar / Beta / Alpha / IR
-      universe.ts           # 30 标的 + CIK 映射
+      engine.ts                         # 自研回测引擎（月度 axis + 月/季调仓）
+      runner.ts                         # 10 步流水线 + 多因子 + 全部 Phase 5-10 计算
+      factor.ts                         # 12-1 momentum + 通用 momentum
+      prices.ts                         # Yahoo monthly fetch + cache
+      metrics.ts                        # CAGR/Sharpe/MaxDD/Calmar/Beta/Alpha/IR
+      universe.ts                       # 60 标的 + CIK 映射
+      universeProvider.ts               # ★ Phase 6: 时变 universe 抽象
+      costModel.ts                      # ★ Phase 7: 分层成本 + sqrt 冲击
+      robustness.ts                     # ★ Phase 8: OOS + Bootstrap + 子区间
+      benchmarkAttribution.ts           # ★ Phase 9: 5 ETF OLS 归因
     fundamentals/
-      types.ts              # FundamentalSnapshot 类型
-      yahoo.ts              # YahooFundamentalsProvider
-      sec.ts                # SecEdgarProvider（fetch + fetchAll 历史路径）
-      cikMap.ts             # 远程 CIK fallback
-      merge.ts              # Yahoo + SEC 合并策略
-      cache.ts              # 24h TTL + in-flight dedup
+      types.ts                          # FundamentalSnapshot（含 marketCap + 3 个 SEC 绝对值）
+      yahoo.ts                          # YahooFundamentalsProvider + marketCap 抽取
+      sec.ts                            # SecEdgarProvider + fetchAll 历史路径
+      cikMap.ts                         # 远程 CIK fallback
+      merge.ts                          # Yahoo + SEC 合并 + Phase 5 字段透传
+      cache.ts                          # 24h TTL + in-flight dedup
     factors/
-      multifactor.ts        # 横截面 z-score + 等权合成 + 覆盖率报告
-    ai.ts                   # DeepSeek 接入：plan / conclusion / coach / 标题生成
-    exportMarkdown.ts       # 客户端 Markdown 导出（无 server 依赖）
-    api.ts                  # requireUser / badRequest / serverError helper
-    seedDemo.ts             # 新用户 seed 3 个 demo studies
+      multifactor.ts                    # 横截面 z-score + 等权合成
+      pitMultifactor.ts                 # ★ Phase 4.2 + 5: 全 PIT 多因子（含历史 Value）
+      historicalValue.ts                # ★ Phase 5: PE/PB/PS 反推
+    paper/                              # ★ Phase 10
+      valuation.ts                      # equalWeight + valuatePortfolio
+    util/
+      inflight.ts                       # ★ Sprint #7: 通用 in-flight Promise dedup
+    ai.ts                               # DeepSeek：plan / conclusion / coach / 标题
+    exportMarkdown.ts                   # 客户端 Markdown 导出
+    api.ts                              # requireUser / badRequest / serverError
+    seedDemo.ts                         # 新用户 seed 3 个 demo studies
 
   data/
-    exampleHypotheses.ts    # 28 条分级例子库（初/中/高级）
+    exampleHypotheses.ts                # 28 条分级例子库（初/中/高级）
 
   components/
-    layout/Sidebar.tsx      # 桌面侧边栏 + 移动 tab bar（含 FAB 主操作）
-    ui/                     # Card / Button / Badge / Progress 浅色默认
+    layout/Sidebar.tsx                  # 桌面侧边栏 + 移动 tab bar（含 FAB 主操作）
+    ui/                                 # Card / Button / Badge / Progress 浅色默认
     providers/SessionProvider.tsx
 
-  middleware.ts             # NextAuth 路由保护 + PUBLIC_PATHS 允许 icons/manifest 匿名访问
+  middleware.ts                         # NextAuth 路由保护 + PUBLIC_PATHS（icons/manifest）
 
 prisma/
-  schema.prisma             # User / Account / Session / Study / StudyPlan /
-                            # StudyProgress / StudyResult / FundamentalSnapshot /
-                            # AiUsageDay
-  migrations/               # 5 个手写 SQL（项目用 db push，未走 migrate dev）
-  seed-data.ts              # 3 个 demo 用合成 SHARED_EQUITY 数据
+  schema.prisma                         # User / Study / StudyPlan / StudyProgress /
+                                        # StudyResult / FundamentalSnapshot / 
+                                        # AiUsageDay / PaperPortfolio
+  migrations/                           # 11 个手写 SQL（项目用 db push）
+  seed-data.ts                          # 3 个 demo（合成 SHARED_EQUITY）
+
+docs/
+  codex-review.md                       # 本文档
+  claude/roadmap/                       # Phase 3.1/3.2/4 路线图
+
+scripts/
+  backfill-titles.ts                    # AI 标题回填脚本
+
+src/**/*.test.ts                        # ★ 143 个 Vitest 单测，13 个文件
 ```
 
 ---
 
-## 三天迭代时间轴
+## 四天迭代时间轴
 
 ### Day 1 (2026-05-08) · Stage 1 原型
-**目标**：6 路由全跑通，UI 骨架就位，全部 mock 数据。
-
-- bootstrap Next.js + shadcn/ui + Recharts + Tailwind
-- 6 条路由：`/` / `/studies/new` / `/plan` / `/running` / `/demo-result` / `/data-sources`
-- 中文 UI + 侧边栏布局
-- 提交：`45334ce` `9caa80a` `6ab506e` `3cf0056`
+6 路由跑通骨架、shadcn/ui + Recharts + Tailwind、中文 UI + 侧边栏。提交：`45334ce` `9caa80a` `6ab506e` `3cf0056`
 
 ### Day 2 (2026-05-09) · 持久化 + AI
-**目标**：让原型变成"真"应用。
 
-#### Phase 2.1 — 数据库 + 多用户
-- Prisma + PostgreSQL + NextAuth v5 + GitHub OAuth
-- 严格按 userId 隔离的 Study 模型
-- JWT session（修复 middleware 重定向死循环 bug `6b0043b`）
-- /cancel 端点 + 幂等 running 页 (`f032251`)
-- 提交：`257f7bf` `f032251` `6b0043b`
+**Phase 2.1**：Prisma + PostgreSQL + NextAuth v5 + GitHub OAuth + JWT session（修复 middleware 重定向死循环）+ /cancel + 幂等 running 页。`257f7bf` `f032251` `6b0043b`
 
-#### Phase 2.2-lite — 真实进度轮询
-- 把模拟 setTimeout 替换为真 progress 表轮询
-- Dashboard 删除研究功能
-- 提交：`c29c853`
+**Phase 2.2**：DeepSeek 流式 plan + 同步 conclusion + describeAiError + 密钥脱敏 + 每用户每日 quota。`10eeddc` `89b072d` `cba8ed7`
 
-#### Phase 2.2 — AI 接入（DeepSeek）
-- 最初接 Anthropic Claude，第二天切到 DeepSeek（成本考虑，~95% 节省）
-- 流式生成 plan + 同步生成 conclusion
-- `describeAiError` 错误信息映射 + 密钥脱敏
-- 每用户每日 quota（plan 10 / conclusion 20 / coach 60）
-- 提交：`10eeddc` `89b072d` `cba8ed7`
+### Day 3 (2026-05-10) · 大爆发 + 评审 backlog 清零
 
-### Day 3 (2026-05-10) · 大爆发
+**Phase 3** `394903e` 真实回测引擎：自研 monthly engine + 12-1 momentum + 完整指标 + 因子 IC 诊断
 
-#### Phase 3 — 真实回测引擎
-- 自研月度回测引擎（engine.ts）
-- 12-1 momentum 因子（Jegadeesh-Titman 经典）
-- yahoo-finance2 SDK 拉月度调整收盘价
-- 风险指标完整：CAGR / Sharpe / Max DD / Calmar / 年化波动率 / Beta / Alpha / IR / 月度胜率 / 年化换手率
-- 因子诊断：IC / IC IR / Q1-Q5 spread
-- 提交：`394903e`
+**Phase 3.1** `92d7c0a` 研究体验：DataQualityCard + 年度表 + 月度极值 + 再平衡历史 + 参数敏感性 + Markdown 导出 + Copy & Modify
 
-#### Phase 3.1 — 研究体验
-- DataQualityCard：survivorship + 因子类型 + 免责声明
-- AnnualReturnsTable + BestWorstMonthsCard + RebalanceHistoryCard
-- 参数敏感性扫描（动量回看 6/9/12 + 月/季再平衡 + Top 10/20/30%）
-- Markdown 导出 + Copy & Modify
-- /studies/new 加 `?cloneFrom=<id>` 预填
-- 提交：`92d7c0a`
+**Phase 3.2** `e86edb7` 实验管理：tags / favorited / archived + 视图筛选 + 4 种排序 + 双研究对比页
 
-#### Phase 3.2 — 实验管理 + 对比
-- Study 加 tags / favorited / archived
-- PATCH 端点严格白名单
-- Dashboard 视图（活跃/收藏/仅归档/全部）+ 实时搜索 + 多维筛选 + 4 种排序
-- 新页面 `/studies/compare?a=ID&b=ID`：指标对比 + 参数差异 + 权益叠加 + 回撤对比
-- 提交：`e86edb7`
+**Phase 4** `8a52dc5` 多因子地基：Yahoo + SEC EDGAR + FundamentalSnapshot 缓存 + Value+Quality+Momentum 等权 + 因子覆盖率
+**Phase 4.1** `aea06c2` CIK 自动 fallback + ROIC 自算 + EV/EBITDA 兜底
+**Phase 4.2** `6964443` PIT 历史快照：SEC fetchAll + 90 天 reporting lag → SEC Quality 因子真 PIT
 
-#### Phase 4 — 基本面 + 多因子地基
-- Yahoo + SEC EDGAR 混合（**全免费方案**，按用户偏好选定）
-- FundamentalSnapshot 缓存表（24h TTL）
-- Provider 抽象 + Yahoo 当前快照 + SEC 全历史
-- 因子覆盖率报告 + 最末次再平衡持仓的多因子分解
-- /studies/new 加因子组合选择器
-- 提交：`8a52dc5`
+**Sprint #1** `cf62432` 5 CRITICAL bug：start/cancel race + PIT cutoff 一月偏差 + SEC anchor truthy + EPS 拆股 + SEC 惊群
+**Sprint #2** `93acca7` UI 7 项重大问题：shadcn 默认浅色 + tab 命名 + logs 死链 + 数据源页演示横幅 + plan 假按钮 + Alpha 显示
+**Sprint #3** `1058572` AI 假设教练：3-12 轮对话 + 28 例子分级
+**Sprint #4** `3393486` result 页 4 tab 重组 + 移动适配 + ETA + 重试文案 + 色盲适配 + clone 提示
+**Sprint #5** `b37e4f4` HIGH 健壮性：Yahoo D/E + axis 跳月 + SEC 债务概念 + Plan SSE done + AI quota retry
+**Sprint #6** `bd9e701` MEDIUM + UI 微调收尾
 
-#### Phase 4.1 — 改进微调
-- CIK 自动 fallback（远程 sec.gov/files/company_tickers.json）
-- ROIC 自算（NetIncome / (Equity + Total Debt) 简化代理）
-- EV/EBITDA 兜底（Yahoo enterpriseToEbitda 缺失时用 EV÷EBITDA 自算）
-- 提交：`aea06c2`
+**PWA + 标题** `b54653e` `172daa8` `b28257a` `51c49cd` `3417d80` iOS 主屏图标 + AI 概要标题生成
 
-#### Phase 4.2 — PIT 历史快照（关键正确性升级）
-- SEC fetchAll 返回每个 10-K filing 形成的快照数组
-- Cache 层加 getSecHistory + getSecHistoryForUniverse
-- buildMultiFactorScores 重写为 PIT-aware：每月 M 只用 reportedAt < M-90 天 的最新 filing
-- Yahoo Value 因子仍 point-in-now（无历史 API），披露文案明确「混合 PIT」
-- 提交：`6964443`
+### Day 4 (2026-05-11) · Sprint #7 + Phase 5-10 实盘化
 
-#### Sprint #1 — 5 CRITICAL + 1 HIGH 紧急修复
-独立代码评审发现的 race / 正确性 bug：
-- C1：PIT cutoff 一个月偏差（runner.ts monthKeyToCutoff）
-- C2：/start 双跑竞态（atomic updateMany 修复）
-- C3：SEC anchor truthy bug（fiscalDate 被设成 today 污染缓存）
-- C4：epsGrowth 在拆股年失真（NVDA/AAPL/TSLA），历史路径已禁用
-- C5：SEC 惊群（in-flight Promise dedup）
-- H1：/cancel 同样竞态条件
-- 提交：`cf62432`
+**Sprint #7** `0663f1c` Vitest 引入 + 64 核心单测：PIT cutoff、SEC as-of、engine axis、metrics、merge、inflight dedup、/start atomic claim
 
-#### Sprint #2 — UI 7 项重大问题
-独立 UI 评审发现的高 ROI 改进：
-- U1：shadcn Card/Button/Progress 默认浅色（消除 18 处覆盖）
-- U2：仪表盘 tab 命名（活跃/收藏/仅归档/全部）
-- U3：删 result 页 logs 死链
-- U4：About 页矛盾文案（PIT 表述不一致）
-- U7：/data-sources 加演示横幅 + 真实数据源绿条
-- U12：plan 页假「编辑」按钮删除
-- U18：Alpha 负数 +-X% bug
-- 提交：`93acca7`
+**Phase 5** `5331be9` Yahoo Value PIT 化：MarketCap_M = MarketCap_today × (adjclose_M / adjclose_today) → SEC PIT-visible 绝对值（NetIncomeTTM / StockholdersEquity / RevenuesTTM）→ 历史 PE/PB/PS。**消除 Phase 4.2 最后一处披露的前视偏差**
 
-#### Sprint #3 — AI 假设教练
-- 新路由 `/studies/coach`：3-12 轮自适应对话
-- DeepSeek 流式 + 28 条分级例子（初/中/高级 + 行业/日历/经验现象）
-- AI 输出 [FINAL] + JSON sentinel，前端识别后展示「进入新研究」CTA
-- AiUsageDay 加 coachCalls 单独计费（每用户每日 60 轮）
-- 提交：`1058572`
+**Phase 6** `afe62f6` 股票池 30 → 60 + UniverseProvider 接口（为时变 universe 铺路）+ 加入 6 只「淡出大市值」（INTC/IBM/GE/F/KSS/X）部分缓解幸存者偏差
 
-#### Sprint #4 — Result 页重构 + 移动适配
-- result 页 4 tab 重新分配（概览/表现/持仓/分析），消除 3 处指标表重复
-- 新增「持仓」tab 容纳 RebalanceHistory + FactorBreakdown
-- `useIsNarrow` hook：移动端线条加粗 + tick 间隔放宽 + Y 轴宽度调整
-- runner 实时更新 step note（Yahoo+SEC 17/30 · SEC 历史 12/30）
-- Running 页失败按钮按 step 区分文案
-- MetricCell 加 ▲▼ 三角符号（色盲适配）
-- Clone 模式假设输入框琥珀边框 + 警告
-- DataQualityCard fallback 按 factorMix 分支
-- 提交：`3393486`
+**Phase 7** `a3b2e52` 真实交易成本：mega/large/mid 三档 spread（1/4/10 bps）+ √turnover × 5bps 市场冲击 + 用户佣金。BacktestInput.costMode + Study.costModel；新研究默认 tiered
 
-#### Sprint #5 — HIGH 健壮性
-- H2：Yahoo D/E 单位启发式（>5 视为 pct）
-- H3：engine 改用 fullAxis 驱动，跳月不再让 CAGR 错算
-- H4：SEC 债务概念去重（LongTermDebtNoncurrent + DebtCurrent，不再混入 LongTermDebtCurrent）
-- H5：Plan SSE 错误也发 done 帧
-- H6：`isBillableError` —— 429/5xx 扣 quota，401-404 不扣
-- 提交：`b37e4f4`
+**Phase 8** `29a1bb7` Out-of-sample 70/30 拆分 + IID Bootstrap 1000 次 95% CI（Sharpe/CAGR/MaxDD）+ 前后两段子区间。结果页加 RobustnessCard
 
-#### Sprint #6 — MEDIUM + UI 微调收尾
-- M1：SEC 历史 PIT 行不存 raw + 并发 4→2，内存峰值减半
-- M2：rankByFactor 加 ticker tiebreaker，确定性
-- M3：prices.ts 跳过 endDate 之后的 in-progress bar
-- M4：Study.tags GIN 索引
-- M5：GET /api/studies slim metrics（dashboard 轮询载荷砍半）
-- U17：Failed badge warning→danger（dashboard 与 running 一致）
-- U19：表头 gray-400→gray-500（WCAG AA 4.5:1）
-- U20：IconButton 加 focus-visible 焦点环
-- 提交：`bd9e701`
+**Phase 9** `66076c1` 5 ETF 单变量 OLS 因子归因（SPY 市场 / QQQ 成长 / IWM 小盘 / MTUM 动量 / IUSV 价值）→ alpha 年化 + beta + R²。结果页加 BenchmarkAttributionCard
 
-#### PWA + 移动 UI 打磨
-- iOS apple-icon (180×180 ImageResponse) + 浏览器 favicon (32×32)
-- PWA manifest.webmanifest + appleWebApp metadata
-- Middleware 把 icons/manifest 加入 PUBLIC_PATHS（否则 iOS 显示字母 A 兜底）
-- 移动 tab bar 重设计：~52px → ~72px、22px 图标、11px 标签、激活态蓝条、shadow
-- 「新研究」FAB（56×56 圆形蓝色，上抬 28px，4px 白 ring 形成"扣出"效果）
-- 「关于」加回 mobile（Sprint #4 一时砍掉）
-- AI 标题生成器（DeepSeek + 启发式 fallback），8-16 字精简
-- Backfill 老研究标题（4 条扫描，1 条更新）
-- 提交：`b54653e` `172daa8` `51c49cd` `b28257a` `3417d80`
+**Phase 10** `cc4f01a` Paper trading：从研究最末次再平衡转 buy-and-hold 组合 + 实时估值 vs 基准。新表 PaperPortfolio + /paper 页 + 「转 Paper 组合」按钮
 
 ---
 
-## 已知限制 / 诚实披露
+## 已知限制 / 诚实披露（Phase 5-10 之后）
 
 ### 数据层
-- **股票池**：30 只硬编码大市值美股，**不重建历史 S&P 500 成分股**，存在幸存者偏差（已在每个研究的 DataQualityCard 中显式披露）
-- **Yahoo Value 因子**（PE/PB/PS/EV-EBITDA）仍是 **point-in-now**，应用于所有历史月，存在前视偏差。Phase 5 计划用 SEC EPS + 价格自算历史 PE 消除（未做）
-- **ROIC** 是简化版 `NetIncome / (Equity + Total Debt)`，未做 NOPAT 后税利息调整
-- **EV/EBITDA** 优先 Yahoo `enterpriseToEbitda`，缺失时用 `enterpriseValue ÷ ebitda` 兜底
-- **EPS growth 历史路径已禁用**（拆股年会失真，未做 split-adjusted EPS）
+- **股票池**：60 只硬编码大市值美股，覆盖 8 个 GICS 板块。**仍存在幸存者偏差**——每只标的今天仍在交易（包括 6 只淡出大市值），不重建历史 S&P 500 成分股。Phase 6.5 计划接 Wikipedia 历史成分以彻底消除。
+- **Value 因子 PIT 已修**：PE/PB/PS 现在通过 MarketCap × adjclose 比例反推 + SEC 绝对值，PIT-correct。
+- **EV/EBITDA 仍 point-in-now**：复杂度 vs 收益不划算（EBITDA 需要 D&A 历史），保留 Yahoo 兜底
+- **EPS growth 在历史路径已禁用**（拆股年失真），未做 split-adjusted EPS
 
 ### 工程层
-- **回测 runner 是 fire-and-forget**：单进程 Node，回测计算 + I/O 全在 web 进程内。当前并发量很小，没瓶颈，但扩大用户量需要拆 worker
+- **回测 runner 仍是 fire-and-forget**：单进程 Node，回测 + I/O 全在 web 进程。当前并发量低无瓶颈。
 - **AI quota 是 daily counter**，不是 token-based 也不是 sliding window
-- **Demo seed 数据是合成的**（`prisma/seed-data.ts` SHARED_EQUITY），新用户落地时看到的 3 个 demo 都用同一份单调递增曲线，无回撤——已在产品文档披露
-- **没有自动化测试**：纯手工 + build verify。Vitest 没装
+- **Demo seed 数据是合成 SHARED_EQUITY**（pre-Phase-3 残留）；新用户首次登录看到的 3 个 demo 都用同一份单调递增曲线，无回撤——已在产品文档披露
+- **Paper portfolio 当前是 buy-and-hold**：开仓后不调仓；无邮件 / Telegram 通知（用户主动查）；不算股息 / 税务 / 借券费
 
 ### UX 层
-- 移动端 result 页的图表虽然做了响应式（Sprint #4 U5），但**双轴叠加图在 320px 屏上仍然偏挤**
-- **数据源页**（`/data-sources`）的富途/另类数据 panel 是路线图占位，已加演示横幅和 muted badge 避免误导
-- **没有通知 / 邮件 / Telegram**——回测完成需要用户主动刷新页面或听其他声音判断
+- 移动端 result 页的图表已做响应式（Sprint #4 U5），但双轴叠加图在 320px 屏仍偏挤
+- 数据源页（`/data-sources`）富途 / 另类数据 panel 是路线图占位（已加演示横幅 + muted badge）
+
+---
+
+## 测试覆盖（Sprint #7 + Phase 5-10 累计）
+
+143 个单测 / 13 个文件 / ~300ms 跑完：
+
+| 文件 | 用例数 | 覆盖 |
+|---|---|---|
+| `pitMultifactor.test.ts` | 18 | PIT cutoff 边界、SEC as-of 不泄未来、cross-sectional z 数学、Phase 5 历史 Value 行为 |
+| `historicalValue.test.ts` | 11 | 历史 MarketCap 反推、拆股不变性、PE/PB/PS 公式、负 EPS 处理 |
+| `metrics.test.ts` | 12 | CAGR/Sharpe/MaxDD/turnover/SPY 自比 |
+| `factor.test.ts` | 9 | 12-1 等价 (12,1)、ranking 字典序 tiebreaker |
+| `engine.test.ts` | 6 | axis 严格 1 月、缺失价格、月/季频率、txCost 真扣 |
+| `costModel.test.ts` | 13 | tier 排序、simpleCost、tieredCost spread + sqrt impact + commission |
+| `robustness.test.ts` | 13 | split 数学、bootstrap 确定性、CI 区间、regime-shift |
+| `benchmarkAttribution.test.ts` | 12 | OLS 数学验证、月份对齐、年化 alpha |
+| `merge.test.ts` | 11 | Yahoo wins Value、SEC wins Quality、字段缺失回退 |
+| `universe.test.ts` | 12 | 60 标的列表完整性、CIK 唯一性、provider 接口 |
+| `inflight.test.ts` | 5 | 同 key 复用、不同 key 隔离、settle 后清理 |
+| `valuation.test.ts` | 10 | equalWeight、valuatePortfolio、不可用 ticker 隔离 |
+| `start/route.test.ts` | 5 | updateMany 谓词、并发声明只一个成功 |
 
 ---
 
 ## 已经被审过的部分
 
-- **代码独立评审**（一名 reviewer 用 `代码审查员` 角色）：5 CRITICAL + 6 HIGH + 5 MEDIUM ✅ 全部已修
-- **UI 独立评审**（一名 reviewer 用 `UI 设计师` 角色）：7 重大 + 8 显著 + 5 微调 ✅ 全部已修
-- **生产部署**：每个 Sprint 都有 git commit + push origin + SSH 服务器 git pull + npm build + pm2 reload + curl health check
-- **数据库变更**：每次 schema 改动有手写 SQL migration（`prisma/migrations/`），生产用 `npx prisma db push` 同步
+- **代码独立评审**（用 `代码审查员` 角色 agent）：5 CRITICAL + 6 HIGH + 5 MEDIUM ✅ 全部已修
+- **UI 独立评审**（用 `UI 设计师` 角色 agent）：7 重大 + 8 显著 + 5 微调 ✅ 全部已修
+- **生产部署**：每个 Phase / Sprint 都走 git commit + push + SSH 服务器 git pull + npm build + pm2 reload + curl health check
+- **数据库变更**：每次 schema 改动有手写 SQL migration（`prisma/migrations/`，12 个）；生产用 `npx prisma db push`
+- **Vitest 覆盖**：每次 commit 之前 `npm test` 都过（143 个单测）
 
 ---
 
-## 给 CodeX 的具体审视请求
+## 给 CodeX 的具体审视请求（已更新）
 
-1. **架构合理性**：Next.js 15 App Router 单进程 + Postgres + 在 web 进程里跑回测 —— 这个架构在每天 ~10 用户、~30 个回测的量级下扛得住吗？什么时候应该拆 BullMQ + Redis？拆的边界在哪？
+之前的问题大多已被 Phase 5-10 解决，这里聚焦**新引入的代码 + 仍未解的方向问题**：
 
-2. **PIT 实现完整性**：`src/lib/backtest/runner.ts` 的 `buildMultiFactorScores` 已经是 PIT-aware 了（SEC Quality 因子按 90 天 reporting lag），但 Yahoo Value 因子仍是静态 tilt。**用 SEC EPS × 历史价格自算历史 PE / PB / PS 是否值得？工程量评估？**有没有更简洁的「假 PIT」做法？
+1. **Phase 5 历史 Value 数学**：`src/lib/factors/historicalValue.ts` 的 `historicalMarketCap` 公式是 `MarketCap_today × adjclose_M / adjclose_today`。论证：MarketCap 在拆股时不变（price 与 shares 反向），所以使用 today 锚点 + 历史 adjclose 比例可以反推。**有没有遗漏的边界情况**？比如 special dividend、spinoff、ticker 重命名？
 
-3. **回测引擎正确性**：`src/lib/backtest/engine.ts` 的循环逻辑（decision month → performance month）+ Sprint #5 H3 的 `axisMonths` fix。请审视是否有边界情况错误（特别是 universe 中部分 ticker 在某些月份完全无价格的场景）。
+2. **Phase 7 成本模型校准**：`costModel.ts` 的 mega/large/mid 1/4/10 bps + sqrt(turnover) × 5 bps 是基于"市面文献感觉"。**这些数字在 2024-2025 实盘是否合理**？有没有更精确的校准（比如基于 ADV / vol regime 的）？
 
-4. **代码组织**：`src/lib/backtest/` 9 个文件、`src/lib/fundamentals/` 6 个文件、`src/lib/factors/` 1 个文件。这个分层合理吗？哪些应该合并？哪些应该进一步拆？
+3. **Phase 8 IID bootstrap 局限**：用了 IID 而非 stationary block bootstrap。注释里承认了。**月度大市值数据下这个简化的实际偏差有多大**？是否应该升级到 Politis-Romano stationary bootstrap？
 
-5. **测试缺位**：项目零测试。如果只能加 5-10 个测试用例，**哪些是最值得的**？（提示：PIT 边界、cancel race、SEC anchor、merge 优先级、metrics 计算）
+4. **Phase 9 单变量 OLS 而非多因子回归**：每个 ETF 单独跑，没有构造正交因子（没做 Fama-French 3 / 5）。**这种近似在解读上够用吗**？还是应该咬牙做 FF construction？
 
-6. **下一阶段建议**：基于现状，下一个 Sprint 应该做什么？候选：
-   - (a) **Phase 5**：消除 Yahoo Value 因子的最后一处前视偏差（用 SEC EPS/BookValue + 历史价格自算）
-   - (b) **股票池扩展**：从 30 标的扩到 S&P 100 / Russell 1000 子集
-   - (c) **运营增强**：邮件 / Telegram 通知（回测完成、AI 配额用尽）；监控 / 错误告警接入 Sentry
-   - (d) **新分析维度**：行业暴露 / 因子归因 / Sharpe 滚动稳定性 / 蒙特卡洛压力测试
-   - (e) **测试覆盖**：先把 5 个高风险边界用 Vitest 覆盖
-   - (f) **付费/团队**：Stripe 计费、团队工作区、研究分享链接
-   - 你的建议？
+5. **Phase 10 Paper trading buy-and-hold 不调仓**：当前用户主动来看才更新；没有 cron 任务，没有月底自动再平衡。**最简单的「下一步」是什么**——是 Vercel cron + email 通知，还是引入 BullMQ + Redis 系统化？
 
-7. **任何你看到的隐性 bug / 反模式 / 安全漏洞**——请直接说，不必客气。
+6. **架构演进点**：单进程 Node + 在 web 进程里跑回测 + 所有 SEC fetch 都阻塞 server。**当用户量突破 ~50/天 / 回测突破 ~200/天**时，应该拆 BullMQ + Redis 还是 Trigger.dev / Inngest 这种 BaaS？
+
+7. **PaperPortfolio 数据完整性**：`holdings: Json` 没有 schema 验证。**应该用 Zod 做运行时校验吗**？还是在 valuation.ts 函数边界做？
+
+8. **测试缺口**：143 单测覆盖了核心数学，但**没有 integration test**（端到端 happy path）也**没有 API endpoint test**（除了 /start atomic claim）。**最值得补的下一类测试是什么**？
+
+9. **任何 Phase 5-10 看到的隐性 bug / 反模式 / 安全漏洞**——请直接说，不必客气。
 
 ---
 
@@ -343,12 +291,22 @@ AUTH_GITHUB_ID                    # GitHub OAuth app
 AUTH_GITHUB_SECRET                # GitHub OAuth app
 DEEPSEEK_API_KEY                  # platform.deepseek.com
 AI_MODEL                          # 默认 deepseek-chat (V3-0324)
-SEC_USER_AGENT                    # 形如 "Project Name (contact: email)"
+SEC_USER_AGENT                    # "Project Name (contact: email)"
 ```
 
-## 附录：commit history（最近 30 条，最新在前）
+---
+
+## 附录：commit history（最近 24 条，最新在前）
 
 ```
+cc4f01a feat(phase-10): paper trading — convert studies into tracked portfolios
+66076c1 feat(phase-9): multi-benchmark OLS attribution
+29a1bb7 feat(phase-8): out-of-sample split + bootstrap CIs + subperiod analysis
+a3b2e52 feat(phase-7): tiered transaction cost model
+afe62f6 feat(phase-6): expand universe 30 → 60 tickers + UniverseProvider abstraction
+5331be9 feat(phase-5): full-PIT Value factors via back-derived historical MarketCap
+0663f1c test(sprint-7): Vitest infra + 64 unit tests on critical paths
+81273b1 docs: add CodeX review brief
 3417d80 feat: AI-generated concise study titles + backfill script
 b28257a style(mobile): roomier bottom tab bar + active accent line
 51c49cd style(mobile): elevate "新研究" tab as floating-action-button
@@ -361,23 +319,8 @@ b37e4f4 fix(sprint-5): remaining HIGH from code review
 1058572 feat(sprint-3): AI hypothesis coach + 28-example library
 93acca7 refactor(ui): Sprint #2 cleanup — defaults, labels, dead links
 cf62432 fix(critical): race conditions, PIT cutoff, SEC anchor, EPS splits, SEC dedup
-b824de4 docs: log Phase 4.1 + 4.2 in About changelog
 6964443 refactor(phase-4): PIT historical snapshots for SEC quality factors
 aea06c2 refactor(phase-4): CIK auto-fallback + ROIC self-compute + EV/EBITDA derivation
-1f4f4d5 feat: add About page with usage guide + changelog
 8a52dc5 feat(phase-4): fundamentals + multi-factor research foundation
 e86edb7 feat(phase-3.2): experiment management + study comparison
-92d7c0a feat(phase-3.1): real backtest research experience
-394903e feat(phase-3): real backtest execution via Yahoo Finance + 12-1 momentum
-cba8ed7 feat(phase-2.2): describeAiError mapper + secret scrubbing
-89b072d refactor(phase-2.2): switch from Anthropic to DeepSeek API
-10eeddc feat(phase-2.2): integrate Claude API for plan + conclusion generation
-c29c853 feat(phase-2.2-lite): real progress polling and dashboard delete
-6b0043b fix(auth): switch to JWT session strategy to fix middleware redirect loop
-f032251 feat(stage-2.1): cancel endpoint + idempotent running page
-257f7bf feat(stage-2.1): persist studies via Prisma + GitHub OAuth multi-user
-3cf0056 feat: redesign UI to Chinese with sidebar layout
-6ab506e fix: MetricRow green highlight for CAGR, Max Drawdown, Alpha
-9caa80a feat: animate running page pipeline steps + add fix_plan.md
-45334ce feat: bootstrap AI Quant Copilot Stage 1 prototype
 ```
