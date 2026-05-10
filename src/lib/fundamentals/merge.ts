@@ -50,6 +50,14 @@ export function mergeFundamentals(
     // Growth: SEC preferred.
     revenueGrowth: sec?.revenueGrowth ?? yahoo?.revenueGrowth,
     epsGrowth: sec?.epsGrowth ?? yahoo?.epsGrowth,
+    // Phase 5: pass-through anchors for historical Value computation.
+    // marketCap is Yahoo-only (current snapshot, no SEC equivalent).
+    // Absolute SEC values are SEC-only (Yahoo TTM is restated, inconsistent
+    // with historical 10-K filings).
+    marketCap: yahoo?.marketCap,
+    netIncomeTTM: sec?.netIncomeTTM,
+    revenuesTTM: sec?.revenuesTTM,
+    stockholdersEquity: sec?.stockholdersEquity,
     raw: { yahoo: yahoo?.raw, sec: sec?.raw },
   };
 }

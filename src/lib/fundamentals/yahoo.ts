@@ -23,6 +23,7 @@ interface YfQuoteSummary {
   summaryDetail?: {
     trailingPE?: YfNumeric;
     priceToSalesTrailing12Months?: YfNumeric;
+    marketCap?: YfNumeric;
   };
   financialData?: {
     returnOnEquity?: YfNumeric;
@@ -166,6 +167,12 @@ export class YahooFundamentalsProvider implements FundamentalsProvider {
       })(),
       revenueGrowth: pct(unwrap(fd?.revenueGrowth)),
       epsGrowth: pct(unwrap(fd?.earningsGrowth)),
+      // Phase 5: current market cap (USD). Provides the anchor for back-
+      // deriving historical MarketCap → PIT-correct PE/PB/PS.
+      marketCap: (() => {
+        const raw = unwrap(sd?.marketCap);
+        return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+      })(),
       raw: { defaultKeyStatistics: dks, summaryDetail: sd, financialData: fd },
     };
   }

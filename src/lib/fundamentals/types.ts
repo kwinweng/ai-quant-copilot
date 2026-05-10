@@ -35,6 +35,24 @@ export interface FundamentalSnapshot {
   revenueGrowth?: number; // %
   epsGrowth?: number; // %
 
+  // Phase 5 — current market cap (USD). Used as the anchor to back-derive
+  // historical MarketCap_M = MarketCap_today × (adjclose_M / adjclose_today),
+  // which then drives PIT-correct PE/PB/PS at every backtest month. Only
+  // populated by the Yahoo provider (SEC has no current quote).
+  marketCap?: number;
+
+  // Phase 5 — absolute USD values from SEC filings, needed to compute
+  // PIT-correct Value ratios at any historical month:
+  //   PE_M = MarketCap_M / netIncomeTTM_at_M
+  //   PB_M = MarketCap_M / stockholdersEquity_at_M
+  //   PS_M = MarketCap_M / revenuesTTM_at_M
+  // Populated by SEC source for each historical filing; Yahoo source
+  // leaves them undefined (its TTM is restated and inconsistent with
+  // historical filings).
+  netIncomeTTM?: number;
+  revenuesTTM?: number;
+  stockholdersEquity?: number;
+
   // Optional raw payload for audit / debug.
   raw?: unknown;
 }

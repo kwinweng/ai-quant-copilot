@@ -9,7 +9,12 @@
 
 import type { FundamentalSnapshot } from "@/lib/fundamentals/types";
 import type { FactorScores } from "@/lib/backtest/factor";
-import type { MonthKey } from "@/lib/backtest/prices";
+import type { MonthKey, MonthlyPrices } from "@/lib/backtest/prices";
+import {
+  historicalMarketCap,
+  valueRatiosFromInputs,
+  type HistoricalValueRatios,
+} from "./historicalValue";
 
 // ============================================================
 // Constants
@@ -123,25 +128,57 @@ export function crossSectionalZ(
  *   (a) per-month cross-sectional momentum z-scores (already month-varying),
  *   (b) per-month PIT Quality+Growth z-scores using SEC filings filed before
  *       month M − REPORTING_LAG_DAYS (eliminates look-ahead),
- *   (c) a *static* Yahoo Value tilt (PE/PB/PS/EV-EBITDA from current snapshot,
- *       since Yahoo has no historical API).
+ *   (c) Phase 5: per-month PIT Value z-scores. Historical PE/PB/PS computed
+ *       from MarketCap_M = MarketCap_today × (adjclose_M / adjclose_today)
+ *       divided by SEC NetIncomeTTM / Revenues / StockholdersEquity at the
+ *       PIT-visible filing. EV/EBITDA still falls back to Yahoo's static
+ *       enterpriseToEbitda (Phase 5+ may compute it from SEC).
  *
  * Composite per (ticker, month) = mean of available components. A ticker
- * with no SEC visibility at month M still gets Value+Momentum; a ticker
- * with no momentum signal in month M still gets Value+Quality.
+ * with no SEC visibility at month M still gets Yahoo-fallback Value +
+ * Momentum; a ticker with no momentum signal in month M still gets
+ * Value + Quality.
  *
- * Honest caveat: Yahoo Value is point-in-NOW, restated. Disclosed in the
- * Result page DataQualityCard (`混合 PIT`).
+ * After Phase 5 the strategy is fully PIT for the SEC-derivable factors.
+ * Yahoo's static EV/EBITDA fallback (and tickers missing SEC data) remain
+ * disclosed in the Result page's data quality panel.
  */
 export function buildMultiFactorScores(
   momentumScores: FactorScores,
   yahooSnapshots: Record<string, FundamentalSnapshot>,
   secHistory: Record<string, FundamentalSnapshot[]>,
+  // Phase 5: extra inputs for historical Value computation. When omitted
+  // (e.g. tests that don't care about Value), the function falls back to
+  // the pre-Phase-5 static Yahoo Value tilt — this keeps existing call
+  // sites + tests green during the migration.
+  prices?: MonthlyPrices,
 ): FactorScores {
   const tickers = Object.keys(momentumScores);
   if (tickers.length === 0) return {};
 
-  // ----- (c) Static Yahoo Value tilt -----
+  // ----- Anchors for historical Value back-derivation -----
+  const adjcloseToday: Record<string, number> = {};
+  if (prices) {
+    for (const t of tickers) {
+      const series = prices[t];
+      if (!series || series.size === 0) continue;
+      let last: number | undefined;
+      for (const v of series.values()) last = v;
+      if (typeof last === "number" && Number.isFinite(last) && last > 0) {
+        adjcloseToday[t] = last;
+      }
+    }
+  }
+  const useHistoricalValue =
+    prices != null &&
+    Object.values(yahooSnapshots).some(
+      (s) => typeof s?.marketCap === "number" && (s.marketCap ?? 0) > 0,
+    );
+
+  // ----- Static Yahoo Value tilt (fallback / Phase 4-style) -----
+  // Always computed because EV/EBITDA only has a Yahoo source, and because
+  // tickers without SEC absolute USD inputs (or without a marketCap anchor)
+  // still benefit from a Yahoo-restated tilt rather than zero contribution.
   const collectYahoo = (
     field: keyof FundamentalSnapshot,
   ): Map<string, number> => {
@@ -152,20 +189,30 @@ export function buildMultiFactorScores(
     }
     return m;
   };
-  const peZ = crossSectionalZ(collectYahoo("pe"), true);
-  const pbZ = crossSectionalZ(collectYahoo("pb"), true);
-  const psZ = crossSectionalZ(collectYahoo("ps"), true);
+  const peYZ = crossSectionalZ(collectYahoo("pe"), true);
+  const pbYZ = crossSectionalZ(collectYahoo("pb"), true);
+  const psYZ = crossSectionalZ(collectYahoo("ps"), true);
   const evZ = crossSectionalZ(collectYahoo("evEbitda"), true);
-  const valueZByTicker = new Map<string, number>();
+  const yahooValueZByTicker = new Map<string, number>();
   for (const t of tickers) {
     const parts: number[] = [];
-    for (const m of [peZ, pbZ, psZ, evZ]) {
+    for (const m of [peYZ, pbYZ, psYZ, evZ]) {
       const v = m.get(t);
       if (v !== undefined) parts.push(v);
     }
     if (parts.length > 0) {
-      valueZByTicker.set(t, parts.reduce((s, x) => s + x, 0) / parts.length);
+      yahooValueZByTicker.set(
+        t,
+        parts.reduce((s, x) => s + x, 0) / parts.length,
+      );
     }
+  }
+  // Yahoo-only EV/EBITDA z-score broken out so we can blend it with the
+  // historical PE/PB/PS z (Phase 5) when prices are available.
+  const yahooEvZByTicker = new Map<string, number>();
+  for (const t of tickers) {
+    const v = evZ.get(t);
+    if (v !== undefined) yahooEvZByTicker.set(t, v);
   }
 
   // ----- Month axis -----
@@ -184,6 +231,61 @@ export function buildMultiFactorScores(
       if (typeof v === "number" && Number.isFinite(v)) vals.set(t, v);
     }
     monthMomZ.set(month, crossSectionalZ(vals, false));
+  }
+
+  // ----- (c) Per-month PIT Value z-scores (Phase 5) -----
+  // For each month, build {ticker → historical PE/PB/PS} using
+  //   MarketCap_M = MarketCap_today × (adjclose_M / adjclose_today)
+  //   ratio = MarketCap_M / SEC absolute denominator from PIT-visible filing
+  // Then z-score each ratio cross-sectionally and average. Falls back to
+  // the static Yahoo Value z when prices aren't supplied or when the
+  // ticker lacks the inputs at this month.
+  const monthValueZ = new Map<MonthKey, Map<string, number>>();
+  if (useHistoricalValue) {
+    for (const month of sortedMonths) {
+      const cutoff = monthKeyToCutoff(month, REPORTING_LAG_DAYS);
+      const peVals = new Map<string, number>();
+      const pbVals = new Map<string, number>();
+      const psVals = new Map<string, number>();
+      for (const t of tickers) {
+        const adjAtM = prices![t]?.get(month);
+        const today = adjcloseToday[t];
+        const mcapToday = yahooSnapshots[t]?.marketCap;
+        const histMcap = historicalMarketCap(mcapToday, today, adjAtM);
+        const pitSnap = pickSnapshotAsOf(secHistory[t], cutoff);
+        const ratios: HistoricalValueRatios = valueRatiosFromInputs(
+          histMcap,
+          pitSnap,
+        );
+        if (ratios.pe !== undefined) peVals.set(t, ratios.pe);
+        if (ratios.pb !== undefined) pbVals.set(t, ratios.pb);
+        if (ratios.ps !== undefined) psVals.set(t, ratios.ps);
+      }
+      const peZ_t = crossSectionalZ(peVals, true);
+      const pbZ_t = crossSectionalZ(pbVals, true);
+      const psZ_t = crossSectionalZ(psVals, true);
+      const out = new Map<string, number>();
+      for (const t of tickers) {
+        const parts: number[] = [];
+        for (const m of [peZ_t, pbZ_t, psZ_t]) {
+          const v = m.get(t);
+          if (v !== undefined) parts.push(v);
+        }
+        // Blend EV/EBITDA from the static Yahoo z-score — the only Value
+        // sub-factor without a historical equivalent.
+        const evV = yahooEvZByTicker.get(t);
+        if (evV !== undefined) parts.push(evV);
+        if (parts.length === 0) {
+          // Fall back to fully-static Yahoo Value when no historical inputs
+          // landed for this ticker at this month.
+          const fallback = yahooValueZByTicker.get(t);
+          if (fallback !== undefined) out.set(t, fallback);
+        } else {
+          out.set(t, parts.reduce((s, x) => s + x, 0) / parts.length);
+        }
+      }
+      monthValueZ.set(month, out);
+    }
   }
 
   // ----- (b) Per-month PIT Quality+Growth z-scores using SEC history -----
@@ -226,13 +328,19 @@ export function buildMultiFactorScores(
   }
 
   // ----- Composite: equal-weight mean of available components -----
+  // Phase 5: Value contribution is now month-varying (monthValueZ) when
+  // historical inputs are available, falling back to the static Yahoo z
+  // (yahooValueZByTicker) otherwise. The composite formula itself is
+  // unchanged: arithmetic mean of available z-scores at each (ticker, M).
   const composite: FactorScores = {};
   for (const t of tickers) {
     const m = new Map<MonthKey, number>();
-    const valueZ = valueZByTicker.get(t);
+    const staticValueZ = yahooValueZByTicker.get(t);
     for (const month of sortedMonths) {
       const momZ = monthMomZ.get(month)?.get(t);
       const qualZ = monthQualityZ.get(month)?.get(t);
+      const histValueZ = monthValueZ.get(month)?.get(t);
+      const valueZ = histValueZ ?? staticValueZ;
       const parts: number[] = [];
       if (momZ !== undefined) parts.push(momZ);
       if (valueZ !== undefined) parts.push(valueZ);

@@ -669,9 +669,12 @@ function DataQualityCard({
   // Sprint #4 U15: factorMix-aware fallback. The previous fallback only
   // mentioned momentum, which would mislead users running multifactor studies
   // if the runner failed to populate factorTypeNote.
+  // Phase 5 update: Value factors are now PIT-correct via back-derived
+  // historical MarketCap; only EV/EBITDA still falls back to Yahoo's static
+  // snapshot. Use "全 PIT 多因子" wording.
   const factorTypeFallback =
     factorMix === "multifactor"
-      ? "多因子（Value + Quality + 12-1 Momentum）；SEC Quality 因子已 PIT（90 天 reporting lag），Yahoo Value 因子仍是 point-in-now 静态贴一份。"
+      ? "全 PIT 多因子（Value + Quality + 12-1 Momentum）：Value 与 Quality 均按 90 天 reporting lag 做 PIT 计算，EV/EBITDA 仍为 Yahoo 当前快照兜底。"
       : "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子";
   const factorTypeNote = dq?.factorTypeNote ?? factorTypeFallback;
   const advisoryDisclaimer =

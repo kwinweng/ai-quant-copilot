@@ -40,6 +40,25 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Phase 5 · Value 因子 PIT 化",
+    date: "2026-05-10",
+    title: "PE / PB / PS 历史值消除前视偏差，多因子从「混合 PIT」升级到「全 PIT」",
+    summary:
+      "原 Yahoo Value 静态 tilt（用今天的 PE 贴满全部历史月）替换为：MarketCap_M = MarketCap_today × (adjclose_M / adjclose_today) 反推 + SEC PIT-visible 绝对值（NetIncomeTTM / StockholdersEquity / RevenuesTTM）。所有 SEC-derivable Value 因子现在都 PIT-correct。",
+    highlights: [
+      "FundamentalSnapshot 加 marketCap / netIncomeTTM / revenuesTTM / stockholdersEquity 4 个新字段",
+      "Yahoo provider 从 summaryDetail.marketCap 抽出当前 MarketCap",
+      "SEC fetch + fetchAll 透传 NetIncomeTTM / Revenues / StockholdersEquity 绝对值",
+      "新模块 src/lib/factors/historicalValue.ts：historicalMarketCap + valueRatiosFromInputs + valueRatiosAtMonth + latestAdjcloseByTicker（4 个纯函数）",
+      "buildMultiFactorScores 接受 prices 参数，在每个回测月做 per-month Value z-score 替换原静态 Yahoo z",
+      "拆股不变性：MarketCap = price × shares，二者反向缩放，公式天然处理拆股",
+      "EV/EBITDA 仍 Yahoo 当前快照兜底（D&A 历史抽取留 Phase 5+）",
+      "数据质量披露文案 + About 页同步更新为「全 PIT 多因子」",
+      "+12 个测试（historicalValue 11 个 + pitMultifactor 1 个 Phase 5 专项），共 76/76 通过",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
     version: "Sprint #7 · 测试与正确性硬化",
     date: "2026-05-10",
     title: "Vitest 引入 + 64 个核心单测覆盖关键边界",
@@ -534,8 +553,8 @@ function UsageGuide() {
         <div className="space-y-2.5 text-sm text-gray-700">
           <DataRow
             source="Yahoo Finance"
-            usage="月度调整收盘价 + 当前快照基本面比率（PE/PB/PS/EV-EBITDA 用于 Value 静态 tilt）"
-            limit="非官方 API；Value 因子仍为 point-in-now，应用于所有历史月，存在前视偏差（Phase 5 计划用 SEC EPS 自算历史 PE 消除）"
+            usage="月度调整收盘价 + 当前 MarketCap（用于反推历史 MarketCap_M = MarketCap_today × adjclose 比例）+ EV/EBITDA 当前快照"
+            limit="非官方 API；Phase 5 起 PE/PB/PS 已是 PIT-correct（拆股不变量），EV/EBITDA 仍为 point-in-now 兜底"
           />
           <DataRow
             source="SEC EDGAR XBRL"
@@ -559,8 +578,8 @@ function UsageGuide() {
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <div>
-              <span className="font-medium">混合 PIT：</span>
-              SEC Quality 因子（ROE / ROIC / 毛利率 / D-E）已是 point-in-time（90 天 reporting lag）；Yahoo Value 因子（PE/PB/PS/EV-EBITDA）仍是 point-in-now 静态贴一份，存在前视偏差。
+              <span className="font-medium">全 PIT 多因子：</span>
+              Phase 5 起 Value 因子（PE / PB / PS）从 MarketCap_M = MarketCap_today × adjclose_M / adjclose_today 反推后 ÷ SEC PIT 绝对值（NetIncomeTTM / StockholdersEquity / RevenuesTTM）得到，已 PIT-correct。Quality 因子（ROE / ROIC / 毛利率 / D-E）90 天 reporting lag 也 PIT-correct。仅 EV/EBITDA 仍是 Yahoo 当前快照兜底。
             </div>
           </div>
           <div className="flex items-start gap-2">

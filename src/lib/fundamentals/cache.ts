@@ -33,6 +33,10 @@ type CachedRow = {
   debtToEquity: number | null;
   revenueGrowth: number | null;
   epsGrowth: number | null;
+  marketCap: number | null;
+  netIncomeTTM: number | null;
+  revenuesTTM: number | null;
+  stockholdersEquity: number | null;
   raw: Prisma.JsonValue;
 };
 
@@ -52,6 +56,10 @@ function rowToSnapshot(row: CachedRow): FundamentalSnapshot {
     debtToEquity: row.debtToEquity ?? undefined,
     revenueGrowth: row.revenueGrowth ?? undefined,
     epsGrowth: row.epsGrowth ?? undefined,
+    marketCap: row.marketCap ?? undefined,
+    netIncomeTTM: row.netIncomeTTM ?? undefined,
+    revenuesTTM: row.revenuesTTM ?? undefined,
+    stockholdersEquity: row.stockholdersEquity ?? undefined,
     raw: row.raw,
   };
 }
@@ -70,6 +78,10 @@ async function writeCached(snap: FundamentalSnapshot): Promise<void> {
     debtToEquity: snap.debtToEquity ?? null,
     revenueGrowth: snap.revenueGrowth ?? null,
     epsGrowth: snap.epsGrowth ?? null,
+    marketCap: snap.marketCap ?? null,
+    netIncomeTTM: snap.netIncomeTTM ?? null,
+    revenuesTTM: snap.revenuesTTM ?? null,
+    stockholdersEquity: snap.stockholdersEquity ?? null,
     raw:
       snap.raw == null
         ? Prisma.DbNull

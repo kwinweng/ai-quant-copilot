@@ -623,7 +623,15 @@ export async function runBacktest(studyId: string): Promise<void> {
     const momentumScores = compute121Momentum(prices);
     let scores: FactorScores;
     if (isMultiFactor) {
-      scores = buildMultiFactorScores(momentumScores, fundamentals, secHistory);
+      // Phase 5: pass `prices` so Value ratios are computed PIT-correctly
+      // from MarketCap_M / SEC absolute USD inputs (no longer the static
+      // Yahoo Value tilt of the Phase 4.2 design).
+      scores = buildMultiFactorScores(
+        momentumScores,
+        fundamentals,
+        secHistory,
+        prices,
+      );
     } else {
       scores = momentumScores;
     }
@@ -830,7 +838,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         ? "Multi-factor (Value + Quality + 12-1 Momentum)"
         : "Price-only momentum",
       factorTypeNote: isMultiFactor
-        ? "混合 PIT：Quality 因子（ROE / ROIC / 毛利率 / 负债权益）来自 SEC EDGAR 全历史 10-K filings，每月 M 只用 reportedAt < M − 90 天 的最新一份，已消除前视偏差。Value 因子（PE / PB / PS / EV-EBITDA）来自 Yahoo 当前快照，无历史 API 支持，仍是 point-in-NOW、应用于整个窗口期，存在前视偏差。ROIC 为简化版 NetIncome/(Equity+TotalDebt) 代理。EV/EBITDA 优先 Yahoo 直接字段，缺失时用 EV÷EBITDA 自算兜底。Momentum 月度滚动 12-1。"
+        ? "全 PIT 多因子：Quality 因子（ROE / ROIC / 毛利率 / 负债权益）来自 SEC EDGAR 全历史 10-K filings，每月 M 只用 reportedAt < M − 90 天 的最新一份。Value 因子（PE / PB / PS）从 MarketCap_M = MarketCap_today × (adjclose_M / adjclose_today) 反推、除以 SEC PIT-visible 绝对值（NetIncomeTTM / StockholdersEquity / RevenuesTTM）得到，已消除前视偏差。EV/EBITDA 仍用 Yahoo 当前快照兜底。ROIC 为简化版 NetIncome/(Equity+TotalDebt) 代理。Momentum 月度滚动 12-1。"
         : "当前因子仅使用价格信息（12-1 动量），不包含估值/质量/成长等基本面因子",
       priceCoverage: {
         totalDataPoints: totalPoints,

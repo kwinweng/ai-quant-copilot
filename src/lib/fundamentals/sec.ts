@@ -309,6 +309,11 @@ export class SecEdgarProvider implements FundamentalsProvider {
       debtToEquity,
       revenueGrowth,
       epsGrowth,
+      // Phase 5: pass through the absolute USD inputs for downstream
+      // PIT-correct historical Value computation.
+      netIncomeTTM: netIncome?.value,
+      revenuesTTM: revenues?.value,
+      stockholdersEquity: stockholdersEquity?.val,
       raw: {
         entityName: facts.entityName,
         revenues,
@@ -480,6 +485,13 @@ export class SecEdgarProvider implements FundamentalsProvider {
         debtToEquity,
         revenueGrowth,
         epsGrowth,
+        // Phase 5: absolute USD inputs at this fiscal year-end. Downstream
+        // computeHistoricalValueZ uses ni.val / rev.val / eq.val along with
+        // back-derived MarketCap_M to compute PIT-correct PE/PS/PB at every
+        // backtest month within this filing's visibility window.
+        netIncomeTTM: ni?.val,
+        revenuesTTM: rev?.val,
+        stockholdersEquity: eq?.val,
         // Sprint #6 M1: PIT history can have 10-20 rows per ticker × 30
         // tickers = 300+ rows. Carrying the per-row raw payload bloats the
         // JSONB column needlessly — derived ratios above are what the

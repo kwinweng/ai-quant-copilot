@@ -201,6 +201,65 @@ describe("buildMultiFactorScores", () => {
     }
   });
 
+  it("Phase 5 PIT Value: historical PE responds to price changes, not just to today's snapshot", () => {
+    // Two tickers with identical SEC absolute USD inputs (so PE/PB/PS depend
+    // ONLY on MarketCap_M, which depends on adjclose_M). Setup: A's price
+    // dropped 50% by month M, B's stayed flat. With historical Value enabled,
+    // A should look "cheaper" (lower PE → higher Value z-score) at M than at
+    // today, while B's z-score stays roughly neutral.
+    const prices = {
+      A: new Map([
+        ["2020-06", 50], // M
+        ["2020-12", 100], // today
+      ]),
+      B: new Map([
+        ["2020-06", 100],
+        ["2020-12", 100],
+      ]),
+    };
+    const moms: FactorScores = {
+      A: new Map([["2020-06", 0]]),
+      B: new Map([["2020-06", 0]]),
+    };
+    const yahooSnap = (ticker: string, mcap: number) =>
+      snap({
+        ticker,
+        source: "merged" as const,
+        marketCap: mcap, // MarketCap_today
+      });
+    const yahoo: Record<string, FundamentalSnapshot> = {
+      A: yahooSnap("A", 1_000_000_000_000), // $1T MarketCap today
+      B: yahooSnap("B", 1_000_000_000_000),
+    };
+    // Same SEC absolutes for both → ratio differences come only from MarketCap.
+    const earlyFiling = new Date("2020-03-01");
+    const sec = (ticker: string): FundamentalSnapshot[] => [
+      snap({
+        ticker,
+        source: "sec",
+        reportedAt: earlyFiling,
+        netIncomeTTM: 50_000_000_000,
+        stockholdersEquity: 200_000_000_000,
+        revenuesTTM: 100_000_000_000,
+      }),
+    ];
+    const secHistory: Record<string, FundamentalSnapshot[]> = {
+      A: sec("A"),
+      B: sec("B"),
+    };
+
+    // With prices supplied, Phase 5 historical Value kicks in.
+    const phase5 = buildMultiFactorScores(moms, yahoo, secHistory, prices);
+    // A's MarketCap_M = $1T × (50/100) = $500B
+    // B's MarketCap_M = $1T × (100/100) = $1T
+    // Same SEC denominators → A has lower PE/PB/PS → higher Value z (lower-is-
+    // better inverted). Composite is mom (z=0 for both, identical) + value z.
+    // So A should be > B at month 2020-06.
+    const a = phase5.A.get("2020-06")!;
+    const b = phase5.B.get("2020-06")!;
+    expect(a).toBeGreaterThan(b);
+  });
+
   it("PIT-correctness: filings filed AFTER decision month do not influence that month", () => {
     // Setup designed so SEC data, when visible, would FLIP the ranking versus
     // momentum-only. If PIT works correctly:

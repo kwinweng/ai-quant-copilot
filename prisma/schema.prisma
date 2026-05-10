@@ -180,6 +180,16 @@ model FundamentalSnapshot {
   // Growth
   revenueGrowth Float?
   epsGrowth     Float?
+  // Phase 5: current MarketCap (USD), used to back-derive historical
+  // MarketCap_M = MarketCap_today × (adjclose_M / adjclose_today). Only
+  // populated by Yahoo source; SEC source leaves it null.
+  marketCap     Float?
+  // Phase 5: absolute USD values from SEC filings — required inputs for
+  // computing PE/PB/PS at any historical month. Populated by SEC source
+  // for each historical 10-K snapshot; Yahoo leaves them null.
+  netIncomeTTM       Float?
+  revenuesTTM        Float?
+  stockholdersEquity Float?
   // Audit / debug — original payload so we can re-derive without re-fetching.
   raw           Json?
 
