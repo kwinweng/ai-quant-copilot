@@ -8,6 +8,11 @@ import { Button } from "@/components/ui/button";
 import {
   BookOpen,
   History,
+  GraduationCap,
+  Lightbulb,
+  AlertOctagon,
+  ScanLine,
+  Calculator,
   ArrowRight,
   CheckCircle2,
   AlertTriangle,
@@ -24,7 +29,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 
-type TabKey = "usage" | "changelog";
+type TabKey = "usage" | "learn" | "changelog";
 
 interface ChangelogEntry {
   version: string;
@@ -39,6 +44,23 @@ interface ChangelogEntry {
 // Source of truth for the in-app changelog. Update this list whenever a new
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "Phase 11 · 量化入门科普",
+    date: "2026-05-11",
+    title: "「关于」加第三个 tab，把报告里的所有术语用大白话讲清楚",
+    summary:
+      "用户反馈：跑完研究看不懂报告里的指标 + 偏差 + PIT 都是什么。这一版加了「量化入门」tab，MVP 4 章，口语化风格，绑定本工具实际功能讲解。后续每个产品 phase 上线会同步更新对应章节。",
+    highlights: [
+      "新 tab「量化入门」，与「使用说明」「更新记录」平级",
+      "第 1 章「量化交易是什么」：因子 / 回测 / 再平衡 / 基准四个核心概念",
+      "第 2 章「报告指标」：CAGR / Sharpe / Max DD / Calmar / Alpha / Beta / IR / 胜率 / 换手率 9 个指标的口语化解释",
+      "第 3 章「陷阱」：幸存者偏差 / 前视偏差 / 过拟合 / 样本太小，每个有「类比 + 本工具的现状 / 解法」",
+      "第 4 章「PIT」：as-reported vs restated 概念 + 本工具 Phase 4.2 (Quality) + Phase 5 (Value) 的实现",
+      "组件 LearnSection / Concept / MetricExplain / Pitfall 设计成可复用模板，后续添新章节零样板代码",
+      "尾部标注「未来章节计划」：因子家族、鲁棒性详解、真实成本、推荐资源",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
   {
     version: "Phase 10 · Paper Trading",
     date: "2026-05-11",
@@ -447,12 +469,18 @@ export default function AboutPage() {
         </p>
       </div>
 
-      <div className="flex items-center gap-1 border-b border-gray-200">
+      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
         <TabButton
           active={tab === "usage"}
           onClick={() => setTab("usage")}
           icon={<BookOpen className="h-4 w-4" />}
           label="使用说明"
+        />
+        <TabButton
+          active={tab === "learn"}
+          onClick={() => setTab("learn")}
+          icon={<GraduationCap className="h-4 w-4" />}
+          label="量化入门"
         />
         <TabButton
           active={tab === "changelog"}
@@ -463,6 +491,7 @@ export default function AboutPage() {
       </div>
 
       {tab === "usage" && <UsageGuide />}
+      {tab === "learn" && <LearnGuide />}
       {tab === "changelog" && <Changelog />}
     </div>
   );
@@ -864,6 +893,409 @@ function Tech({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-center bg-gray-50 border border-gray-100 rounded px-2 py-1.5 text-gray-700">
       {children}
+    </div>
+  );
+}
+
+// =====================================================================
+// Learn — Phase 11: quant-101 primer for non-quant users.
+//
+// Style: 口语化 / 多例子 / 少公式. MVP covers 4 chapters; the structure is
+// kept open for later additions (factor families, robustness, real costs,
+// resources). Each new product phase that introduces a concept the user
+// can't read in the report page WITHOUT context should add a paragraph
+// to the relevant chapter here.
+// =====================================================================
+
+function LearnGuide() {
+  return (
+    <div className="space-y-6">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">
+        <div className="font-medium mb-1 inline-flex items-center gap-1.5">
+          <Lightbulb className="h-4 w-4" />
+          这份文档是干嘛的
+        </div>
+        <p className="text-xs text-blue-800 leading-relaxed">
+          AI Quant Copilot
+          的报告页有不少专业术语（CAGR / Sharpe / PIT / Bootstrap / Alpha
+          ...）。这一页用大白话把它们讲清楚，结合本工具实际功能讲解。每次产品有新功能上线，会同步更新对应章节。**当前是 MVP，4 章**，后续会加更多。
+        </p>
+      </div>
+
+      {/* ============ Chapter 1 — 量化交易概念起步 ============ */}
+      <LearnSection
+        index={1}
+        title="量化交易是什么 / 不是什么"
+        icon={<GraduationCap className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          先讲<em>不是</em>什么：
+        </Para>
+        <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700">
+          <li>
+            <strong>不是「比你聪明的 AI 自动炒股」</strong>——本工具不下单、不预测下周走势。
+          </li>
+          <li>
+            <strong>不是「跟着算法保赚」</strong>——任何号称这点的都是骗子。
+          </li>
+          <li>
+            <strong>不是高频交易</strong>——我们做月度调仓，不做秒级。
+          </li>
+        </ul>
+        <Para>
+          <em>是</em>什么：把「按什么规则选股」这件事写成可重复执行的规则（比如「每月选过去 12 个月涨幅最高的 20% 股票」），然后用历史数据测一遍，看这个规则**过去**赚不赚钱、亏多少、稳不稳。
+        </Para>
+
+        <Concept name="因子（Factor）">
+          一种「按规则给股票打分」的维度。例如：
+          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+            <li>
+              <strong>动量因子</strong>：过去一段时间涨得多的股票打高分
+            </li>
+            <li>
+              <strong>价值因子</strong>：PE / PB 低（便宜）的股票打高分
+            </li>
+            <li>
+              <strong>质量因子</strong>：ROE / 毛利率高（赚钱能力强）打高分
+            </li>
+          </ul>
+          一个「策略」就是把若干个因子组合起来 → 按总分排序 → 选前 20% 来持有 → 定期换仓。本工具支持单因子（12-1 动量）和多因子（Value + Quality + Momentum 等权）两种模式。
+        </Concept>
+
+        <Concept name="回测（Backtest）">
+          「**假设我过去这么做，结果会是什么样**」的模拟实验。本工具的做法：从 2014 年开始，每月或每季按因子分排序选股，假设你按这个组合持有，看 10 年后赚多少、回撤多大。
+        </Concept>
+
+        <Concept name="再平衡（Rebalance）">
+          多久换一次仓。月度调仓 = 每月底重新选；季度调仓 = 三个月换一次。频率高更敏感但交易成本高，频率低更稳但反应慢。本工具支持月度 / 季度两种。
+        </Concept>
+
+        <Concept name="基准（Benchmark）">
+          策略的对照组。最常见是 SPY（追踪 S&P 500 的 ETF）——你的策略「跑赢 SPY」才算赚到 alpha；不然不如直接买指数。本工具默认 SPY，也支持 QQQ / IWM 等。
+        </Concept>
+
+        <Para>
+          所以本工具的定位很明确：<strong>研究你的策略想法是不是站得住脚</strong>。它不替你做决策，是给你判断材料的。
+        </Para>
+      </LearnSection>
+
+      {/* ============ Chapter 2 — 报告里的指标都是什么意思 ============ */}
+      <LearnSection
+        index={2}
+        title="报告里的指标都是什么意思"
+        icon={<Calculator className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          每个研究跑完，你会在「概览」tab 看到一张关键指标表。挨个解释：
+        </Para>
+
+        <MetricExplain
+          name="CAGR"
+          full="Compound Annual Growth Rate · 年化复合收益率"
+        >
+          「平均每年涨多少」——但是按复利算的。
+          <br />
+          <strong>例</strong>：起始 $100，10 年后 $260 → CAGR ≈ 10%（因为 1.10^10 ≈ 2.59）。
+          <br />
+          <strong>怎么读</strong>：8-12% 在美股大盘是合理预期；超过 20%
+          长期年化是非常少见的（巴菲特一辈子也就 19%）。
+        </MetricExplain>
+
+        <MetricExplain
+          name="Sharpe Ratio"
+          full="夏普比率 · 收益 / 风险比"
+        >
+          收益除以波动的比率。越高表示<strong>每承担一份波动能换来多少收益</strong>。
+          <br />
+          <strong>例</strong>：A 和 B 都 10% 年化，A 月月稳健 / B
+          天天大涨大跌。A 的 Sharpe 远高于 B。
+          <br />
+          <strong>怎么读</strong>：&gt;1 算不错，&gt;2 优秀，&gt;3
+          要警惕（可能过拟合或数据有问题）。SPY 长期 ~0.5-0.7。
+        </MetricExplain>
+
+        <MetricExplain name="Max Drawdown" full="最大回撤">
+          从历史最高点到最低点的<strong>最深亏损百分比</strong>。
+          <br />
+          <strong>例</strong>：账户从 $130 跌到 $80 → 回撤 -38%。
+          <br />
+          <strong>怎么读</strong>：这是实盘最考验心态的指标。如果策略 Max DD
+          是 -40%，问问自己：账户里 $100 万跌到 $60 万你能不能不慌不卖？大多数人在 -30% 就会动摇。
+        </MetricExplain>
+
+        <MetricExplain name="Calmar Ratio" full="卡玛比率 · CAGR ÷ |Max DD|">
+          每承担 1% 的回撤换多少收益。
+          <strong>例</strong>：CAGR 12% / Max DD -20% → Calmar 0.6。&gt;1 算优秀，&gt;2 罕见。
+        </MetricExplain>
+
+        <MetricExplain name="Alpha" full="阿尔法 · 相对基准的「真本事」">
+          扣除基准影响后，策略<strong>额外</strong>赚到的部分。
+          <br />
+          <strong>例</strong>：SPY 涨 10%，你的策略涨 12% → alpha ≈ 2%（年化）。
+          <br />
+          <strong>注意</strong>：本工具的「分析」tab 用 OLS 回归算 alpha，已经扣除了 beta 的影响。如果 alpha 是 0，那基本就是 SPY 的代理而已。
+        </MetricExplain>
+
+        <MetricExplain name="Beta" full="贝塔 · 跟基准的相关性">
+          β=1 表示完全跟基准同涨同跌；β=0 表示跟基准毫无关系；β=1.5 表示基准涨 1% 你涨 1.5%（更激进）。
+          <br />
+          <strong>怎么读</strong>：高 β 策略在牛市领跑、在熊市也跌得多。
+        </MetricExplain>
+
+        <MetricExplain name="IR · Information Ratio" full="信息比率">
+          类似 Sharpe，但分子分母换成「主动收益 / 主动波动」。
+          <strong>衡量策略 alpha 的稳定性</strong>。&gt;0.5 算可观。
+        </MetricExplain>
+
+        <MetricExplain name="月度胜率">
+          一年 12 个月里有几个月赚钱。50% 是基线，60%+ 算稳。但<strong>不要单看这个</strong>——胜率高但每次小赚、偶尔巨亏的策略也很糟糕。
+        </MetricExplain>
+
+        <MetricExplain name="年化换手率">
+          一年大约调仓多少次。低 = 持仓稳，交易成本低；高 = 反应快，但磨损大。月度调仓的多因子策略通常 200-400%（即一年换 2-4 次全部持仓）。
+        </MetricExplain>
+      </LearnSection>
+
+      {/* ============ Chapter 3 — 量化研究里的陷阱 ============ */}
+      <LearnSection
+        index={3}
+        title="量化研究里的「陷阱」（看到这些指标会自动警觉）"
+        icon={<AlertOctagon className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          回测看起来很美好，但有几个常见陷阱会让「美好」变成幻觉。你要学会一眼识别。
+        </Para>
+
+        <Pitfall name="幸存者偏差（Survivorship Bias）">
+          <p>
+            <strong>什么意思</strong>：你只看那些「现在还活着」的股票，那些破产的、退市的、被并购的没在样本里。结果就是回测显得「特别赚」，因为输家都被你不知不觉删掉了。
+          </p>
+          <p className="mt-1">
+            <strong>类比</strong>：你统计「高考上重点大学的学生现在年薪多少」，但是只问了愿意接受你采访的——失败的人多半不接你电话。统计结果会比真实高不少。
+          </p>
+          <p className="mt-1">
+            <strong>本工具的现状</strong>：60 只股票仍然都是「今天还在交易」的。**仍有幸存者偏差**，Phase 6.5 计划接 Wikipedia 历史 S&P 500 成分股以彻底消除。这就是为什么所有研究报告的「数据质量」面板会显式提醒你。
+          </p>
+        </Pitfall>
+
+        <Pitfall name="前视偏差（Look-ahead Bias）">
+          <p>
+            <strong>什么意思</strong>：回测 2014 年时用了 2014 年那会儿还<em>不知道</em>的信息。
+          </p>
+          <p className="mt-1">
+            <strong>例</strong>：你用「公司 2024 年的 ROE」去回测 2014
+            年——但 2014 年这家公司可能还没产生这个数据，或者数据后来被修正了。
+          </p>
+          <p className="mt-1">
+            <strong>类比</strong>：让你「重新考一次高考」，但允许你看完答案再做题。当然能考满分。
+          </p>
+          <p className="mt-1">
+            <strong>本工具的解法</strong>：Phase 4.2 + 5 实现的「PIT」（看下一章详解）。所有 Quality / Value 因子都只用「当时已经公开发布」的信息。
+          </p>
+        </Pitfall>
+
+        <Pitfall name="过拟合（Overfitting）">
+          <p>
+            <strong>什么意思</strong>：你不停调参数（回看期 / 桶宽 / 再平衡频率…），直到回测结果<em>完美</em>。但这个完美只在过去那段历史成立，未来一用就崩。
+          </p>
+          <p className="mt-1">
+            <strong>类比</strong>：你猜上期彩票号码——猜对了，但下次能赢吗？你只是把一组随机数字「拟合」到一个已经发生的结果上。
+          </p>
+          <p className="mt-1">
+            <strong>本工具的解法</strong>：
+            <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+              <li>
+                「参数敏感性扫描」——单独调动量回看期 / 调仓频率 / 桶宽，看 Sharpe 是不是<em>每个变体都还不错</em>。如果只有一组参数 work，那就是过拟合。
+              </li>
+              <li>
+                Phase 8 加的「Out-of-Sample 拆分」+「Bootstrap 95% CI」——专门防过拟合（看下一章详解）。
+              </li>
+            </ul>
+          </p>
+        </Pitfall>
+
+        <Pitfall name="样本太小">
+          <p>
+            <strong>什么意思</strong>：本工具 60 只股票 × 10 年 ≈ 720 个月度观察。统计学上不算多。任何「Sharpe 1.5」之类的指标都可能是噪音。
+          </p>
+          <p className="mt-1">
+            <strong>解法</strong>：Phase 8 的 Bootstrap 重抽样 1000 次给你一个置信区间，告诉你「Sharpe 真实值大概在 0.5 到 2.0 之间」——区间越宽，原始数字越不可信。
+          </p>
+        </Pitfall>
+      </LearnSection>
+
+      {/* ============ Chapter 4 — PIT 到底是什么 ============ */}
+      <LearnSection
+        index={4}
+        title="PIT 到底是什么 · 为什么是量化里最难的问题"
+        icon={<ScanLine className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          PIT = <strong>Point-in-Time</strong>，意思是「站在历史那个时间点能看到的」，与之相对的是「事后才知道的」。
+        </Para>
+
+        <Para>
+          <strong>具体场景</strong>：你想做一个「选 ROE 最高的 20% 股票」的策略，回测 2014 到 2024。
+        </Para>
+
+        <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700">
+          <li>
+            <strong>非 PIT 做法</strong>（错误但常见）：用 Apple 今天（2026 年）的 ROE 数据，去回测 2014 年的 Apple。但 2014 年的财报上 Apple 的 ROE 是<em>当时</em>报告的数字，不是后来调整的。
+          </li>
+          <li>
+            <strong>PIT 做法</strong>（正确）：找 Apple 2013 年 10-K 的报告，取那份报告里写的 ROE，再加 90 天「报告延迟」（公司报告期结束到真正提交 SEC 的时间）→ 这才是 2014 年 3 月你<em>真的能看到</em>的 ROE。
+          </li>
+        </ul>
+
+        <Concept name="Restated vs As-reported（修正后 vs 当时报告的）">
+          公司每年发新财报时，可能会<strong>修正</strong>过去几年的数字（会计变更、合并、错误更正等）。Yahoo Finance 通常显示 restated 数据，而 SEC 提交的 10-K 永远是 as-reported（除非公司明确替换）。**PIT 的标准做法是用 as-reported**。
+        </Concept>
+
+        <Concept name="为什么 PIT 这么重要">
+          <p>没做 PIT 的回测会系统性虚高收益，因为：</p>
+          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+            <li>
+              你「提前知道」了未来会变好/变差的公司——选股不公平
+            </li>
+            <li>
+              restated 数据往往是「向好修正」（坏数据多被掩埋），所以基于它选股像考试有答案
+            </li>
+            <li>
+              学术研究估计：非 PIT 的 Value 因子回测会虚高 0.5-2% 年化
+            </li>
+          </ul>
+        </Concept>
+
+        <Concept name="本工具的 PIT 实现（Phase 4.2 + Phase 5）">
+          <p>
+            <strong>Quality 因子</strong>（ROE / ROIC / 毛利率 / 负债权益）— Phase 4.2 已实现：
+          </p>
+          <ul className="list-disc pl-5 mt-1 mb-2 space-y-0.5 text-xs">
+            <li>SEC EDGAR 拉每个 10-K filing 的<strong>filing date</strong>（提交日期）</li>
+            <li>
+              加 90 天 reporting lag：每月 M 的策略只能用 reportedAt &lt;= M − 90 天 的 filing
+            </li>
+            <li>
+              代码位置：<code>src/lib/factors/pitMultifactor.ts</code> 的{" "}
+              <code>pickSnapshotAsOf</code> 函数
+            </li>
+          </ul>
+          <p>
+            <strong>Value 因子</strong>（PE / PB / PS）— Phase 5 才实现：
+          </p>
+          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+            <li>
+              关键洞察：MarketCap 在拆股时不变（价格腰斩、股本翻倍 → 总市值不变）
+            </li>
+            <li>
+              所以可以反推：MarketCap_M = MarketCap_今天 × (调整收盘价_M ÷
+              调整收盘价_今天)
+            </li>
+            <li>有了历史 MarketCap，再除以 SEC 的 PIT 财报绝对数 → 历史 PE / PB / PS</li>
+          </ul>
+          <p className="mt-2 text-xs text-gray-600">
+            注：EV/EBITDA 暂时还是「今天的快照」，因为构造历史 EV 需要历史现金 / 长债 / D&A
+            数据，工程量大，后续 Phase 5+ 补齐。
+          </p>
+        </Concept>
+
+        <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 text-sm text-emerald-900">
+          <strong>怎么验证你跑的研究是 PIT 的</strong>：完成的研究 →「概览」tab → 顶部「数据质量与偏差」面板 →「因子类型」字段。看到「全 PIT 多因子」就是 Phase 5+ 流程，写「混合 PIT」是 Phase 4.2 流程（Quality 是 PIT，Value 不是）。
+        </div>
+      </LearnSection>
+
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600">
+        <strong>未来章节计划</strong>
+        ：因子家族详解（动量 / 价值 / 质量 / 低波 / 成长每个一段）、鲁棒性检验怎么读（Bootstrap CI / OOS / 子区间）、真实交易成本（spread / impact / commission）、推荐资源清单。等你看完 MVP 觉得有用再加。
+      </div>
+    </div>
+  );
+}
+
+function LearnSection({
+  index,
+  title,
+  icon,
+  children,
+}: {
+  index: number;
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2 pt-4 px-4 border-gray-100">
+        <CardTitle className="text-sm font-semibold text-gray-900 inline-flex items-center gap-2">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold">
+            {index}
+          </span>
+          {icon}
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="px-4 pb-4 space-y-3">{children}</CardContent>
+    </Card>
+  );
+}
+
+function Para({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-sm text-gray-700 leading-relaxed">{children}</p>
+  );
+}
+
+function Concept({
+  name,
+  children,
+}: {
+  name: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-l-2 border-blue-300 pl-3 py-1 text-sm text-gray-700">
+      <div className="font-medium text-gray-900 mb-0.5">{name}</div>
+      <div className="leading-relaxed text-xs">{children}</div>
+    </div>
+  );
+}
+
+function MetricExplain({
+  name,
+  full,
+  children,
+}: {
+  name: string;
+  full?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border border-gray-100 rounded-md p-3 bg-gray-50/40">
+      <div className="flex items-baseline gap-2 mb-1">
+        <span className="text-sm font-semibold text-gray-900">{name}</span>
+        {full ? <span className="text-xs text-gray-500">· {full}</span> : null}
+      </div>
+      <div className="text-xs text-gray-700 leading-relaxed">{children}</div>
+    </div>
+  );
+}
+
+function Pitfall({
+  name,
+  children,
+}: {
+  name: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border border-amber-200 bg-amber-50/50 rounded-md p-3">
+      <div className="text-sm font-semibold text-amber-900 mb-1 inline-flex items-center gap-1.5">
+        <AlertTriangle className="h-3.5 w-3.5" />
+        {name}
+      </div>
+      <div className="text-xs text-amber-900 leading-relaxed space-y-1">
+        {children}
+      </div>
     </div>
   );
 }
