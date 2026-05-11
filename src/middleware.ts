@@ -16,7 +16,11 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
 
   const isAuthRoute = pathname.startsWith("/api/auth");
-  const isPublic = isAuthRoute || PUBLIC_PATHS.has(pathname);
+  // Phase 12: /api/cron/* endpoints use their own CRON_SECRET header check
+  // and must NOT be redirected to /login. The route handlers themselves
+  // enforce auth via the X-Cron-Secret header.
+  const isCronRoute = pathname.startsWith("/api/cron/");
+  const isPublic = isAuthRoute || isCronRoute || PUBLIC_PATHS.has(pathname);
 
   if (!req.auth && !isPublic) {
     const url = new URL("/login", req.nextUrl);
