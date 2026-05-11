@@ -27,6 +27,10 @@ import {
   Copy,
   Settings,
   TrendingUp,
+  Layers,
+  Activity,
+  Coins,
+  Library,
 } from "lucide-react";
 
 type TabKey = "usage" | "learn" | "changelog";
@@ -44,6 +48,20 @@ interface ChangelogEntry {
 // Source of truth for the in-app changelog. Update this list whenever a new
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "Phase 11.5 · 量化入门 4 个进阶章节",
+    date: "2026-05-12",
+    title: "把 MVP 留的「未来章节计划」全部补完——共 9 章",
+    summary:
+      "Phase 11 MVP 留了 4 章占位符没写。这一版全部补齐：因子家族详解（动量/价值/质量/低波/成长 5 个因子各自的大白话定义 + 论文起源 + 行为金融解释 + 本工具实现状态）、鲁棒性检验怎么读（Bootstrap CI / IS-OOS / 子区间三个子检验逐个讲）、真实交易成本（spread / impact / commission / 换手放大 + 本工具两种成本模型对比）、推荐资源清单（入门书 / 进阶书 / 5 篇必读论文 / 中英文社区 / 数据源 / 学习路径）。",
+    highlights: [
+      "Ch6 因子家族：5 个因子各一段，明确标注本工具实现哪些（动量/价值/质量已实现，低波/成长未实现）",
+      "Ch7 鲁棒性：Bootstrap CI / IS-OOS 70-30 / 子区间 50-50 三个检验逐个讲解读方式",
+      "Ch8 交易成本：spread 按市值分层量级感、market impact 的 √turnover 规律、佣金与隐性 PFOF 成本",
+      "Ch9 资源清单：从《打开量化投资的黑箱》到 López de Prado 的完整学习路径建议",
+    ],
+    badge: { label: "更新", tone: "feature" },
+  },
   {
     version: "Phase 12 · Paper 月度调仓提醒",
     date: "2026-05-11",
@@ -1250,10 +1268,375 @@ function LearnGuide() {
         </div>
       </LearnSection>
 
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600">
-        <strong>未来章节计划</strong>
-        ：因子家族详解（动量 / 价值 / 质量 / 低波 / 成长每个一段）、鲁棒性检验怎么读（Bootstrap CI / OOS / 子区间）、真实交易成本（spread / impact / commission）、推荐资源清单。等你看完 MVP 觉得有用再加。
-      </div>
+      {/* ============ Chapter 6 — 因子家族详解 ============ */}
+      <LearnSection
+        index={6}
+        title="因子家族都有谁？（动量 / 价值 / 质量 / 低波 / 成长）"
+        icon={<Layers className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          学界这 40 年挖出来的「能持续跑赢基准的特征」就那么几大类。本工具实现了其中三个（动量 / 价值 / 质量），低波和成长目前没做。下面是大白话版科普——每一段最后会告诉你「在本工具里它现在长什么样」。
+        </Para>
+
+        <Concept name="📈 动量（Momentum）">
+          <p>
+            <strong>大白话</strong>：过去一段时间涨得猛的，倾向于继续涨；跌得猛的，倾向于继续跌（不绝对，但概率上是这样）。最经典的版本叫「12-1 动量」——看过去 12 个月的累计涨幅，但**跳过最近 1 个月**，因为最近 1 个月有反转效应。
+          </p>
+          <p className="mt-1">
+            <strong>为什么有效</strong>：行为金融解释——人对新信息反应慢（业绩好了不会马上把价格涨到位）、对涨势上瘾（已经涨了的接着追）、对亏损不愿割肉（输家不愿卖、价格慢慢往下磨）。
+          </p>
+          <p className="mt-1">
+            <strong>论文起源</strong>：Jegadeesh & Titman (1993)。这篇是动量因子的「圣经」，至今 30 多年还在被引用。
+          </p>
+          <p className="mt-1">
+            <strong>注意</strong>：动量在熊市后期会突然失效（叫 momentum crash），2009 年 3 月那种 V 反就是经典案例。本工具的鲁棒性检验会暴露这种问题。
+          </p>
+          <p className="mt-1">
+            <strong>本工具里</strong>：默认就是 12-1 动量。在「新研究」页选「multifactor」时也会用它作为多因子的一条腿。
+          </p>
+        </Concept>
+
+        <Concept name="💰 价值（Value）">
+          <p>
+            <strong>大白话</strong>：便宜的股票（PE / PB / PS 低）平均长期跑赢贵的股票。「便宜」不是绝对意义上股价低，而是相对每股盈利、每股净资产来说便宜。
+          </p>
+          <p className="mt-1">
+            <strong>为什么有效</strong>：行为解释——人对「明星股」过度追捧，导致它们贵到不合理；对「无聊的便宜货」无视，导致估值压低。最终业绩会让市场修正这个偏差。
+          </p>
+          <p className="mt-1">
+            <strong>论文起源</strong>：Fama & French (1992)。和动量一起被列为「股票收益的两大基石」。
+          </p>
+          <p className="mt-1">
+            <strong>注意</strong>：价值因子在 2010-2020 这十年表现非常差（「价值陷阱」论盛行），但 2022 后随着科技股估值修正又活过来了。说明因子是有周期的，不是永远赚钱的。
+          </p>
+          <p className="mt-1">
+            <strong>本工具里</strong>：PE / PB / PS / EV-EBITDA 四个子因子等权合成。Phase 5 后已经是 PIT 的（每个月用当时知道的财报算估值），不是用今天的快照倒填。
+          </p>
+        </Concept>
+
+        <Concept name="🏗️ 质量（Quality）">
+          <p>
+            <strong>大白话</strong>：「赚钱效率高、负债低」的公司平均跑赢「亏损或高杠杆」的公司。指标看 ROE（净资产收益率）、ROIC（投入资本回报率）、毛利率、债务比率。
+          </p>
+          <p className="mt-1">
+            <strong>为什么有效</strong>：质量好的公司本来就该贵——但市场往往低估「质量持续性」的价值。今年 ROE 35% 的公司，明年大概率还 30%+，而市场不愿意为这种确定性付足够的溢价。
+          </p>
+          <p className="mt-1">
+            <strong>论文起源</strong>：Asness, Frazzini & Pedersen (2019) 的「Quality Minus Junk」论文最系统。但 Warren Buffett 早就用这套了——他买的就是「便宜的好公司」（价值+质量的组合）。
+          </p>
+          <p className="mt-1">
+            <strong>注意</strong>：质量因子是最「平稳」的——不像动量会突然 crash、不像价值会十年低迷——但收益率也比那两个低。它的角色是稳定器。
+          </p>
+          <p className="mt-1">
+            <strong>本工具里</strong>：ROE / ROIC / 毛利率 / 债务/股本 四个子因子等权合成，从 SEC 10-K 财报抽。Phase 4.2 起是 PIT 的（应用 90 天报告滞后）。
+          </p>
+        </Concept>
+
+        <Concept name="📉 低波动（Low Volatility）">
+          <p>
+            <strong>大白话</strong>：波动小的股票长期收益反而不输波动大的股票——按风险调整后，**完爆**它们。这违反「高风险高收益」的直觉，是金融学最反直觉的发现之一。
+          </p>
+          <p className="mt-1">
+            <strong>为什么有效</strong>：行为+结构两方面。行为：散户喜欢「彩票股」（暴涨潜力），导致它们被高估、长期 underperform。结构：基金有「杠杆约束」，只能通过买高 β 股票来追求高收益，进一步抬升它们的价格。
+          </p>
+          <p className="mt-1">
+            <strong>论文起源</strong>：Frazzini & Pedersen (2014) 的「Betting Against Beta」是最有名的版本。
+          </p>
+          <p className="mt-1">
+            <strong>本工具里</strong>：<strong>暂未实现</strong>。需要计算过去 N 个月的收益标准差，做 cross-section z-score 取反（低波动 = 高分）。工程量不大，未来某个 Phase 可以加。
+          </p>
+        </Concept>
+
+        <Concept name="🌱 成长（Growth）">
+          <p>
+            <strong>大白话</strong>：营收/利润增长快的公司倾向于跑赢增长慢的。但**单独用成长因子作为多头基本无效**（因为市场已经把高增长定价进去了），所以学界更常用「合理估值下的成长」（GARP, Growth At Reasonable Price）——成长 × 价值的混合策略。
+          </p>
+          <p className="mt-1">
+            <strong>为什么单独用没效</strong>：你认为「明显高增长」的公司，市场也认为，所以已经贵了。真正的 alpha 在「市场没意识到的、估值还合理的高增长」上，这本质是 GARP。
+          </p>
+          <p className="mt-1">
+            <strong>本工具里</strong>：<strong>暂未实现</strong>。需要 YoY 营收/利润增长率，从 SEC 数据可以算。如果加，建议直接做 GARP（成长 × 价值合成）而非纯成长。
+          </p>
+        </Concept>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-xs text-blue-900">
+          <strong>怎么选因子组合？</strong>对自用研究来说，最经典也最稳的搭配是「价值 + 质量 + 动量」三因子等权（就是本工具 multifactor 模式的默认）。如果你想偏防御，加低波；如果偏激进，纯动量也行——但要承担更大的 drawdown 和 momentum crash 风险。
+        </div>
+      </LearnSection>
+
+      {/* ============ Chapter 7 — 鲁棒性检验怎么读 ============ */}
+      <LearnSection
+        index={7}
+        title="鲁棒性检验：一次回测的结果，到底信不信？"
+        icon={<Activity className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          假设你跑了一个研究，结果说「CAGR 14%，Sharpe 1.5，跑赢 SPY 5 个点」——看起来很美。但你应该立刻问三个问题：
+        </Para>
+        <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1">
+          <li>这个结果是<strong>运气还是稳定</strong>？换个起点跑会不会就崩了？</li>
+          <li>你是不是把<strong>训练数据当成验证数据</strong>了？（过拟合）</li>
+          <li>这个结果在<strong>不同的市场环境</strong>（牛市/熊市/震荡）下都成立吗？</li>
+        </ul>
+        <Para>
+          鲁棒性检验就是回答这三个问题的工具。研究结果页底部有一个「鲁棒性分析」面板，包含三个子检验：
+        </Para>
+
+        <Concept name="🎲 Bootstrap CI（自助法置信区间）">
+          <p>
+            <strong>是什么</strong>：把你的月度收益序列<strong>有放回随机抽样</strong>重组 1000 次，每次重新算 CAGR / Sharpe / 最大回撤。然后看这 1000 次结果的分布——取 5% 和 95% 分位数就是 90% 置信区间。
+          </p>
+          <p className="mt-1">
+            <strong>类比</strong>：你抛了 100 次硬币得到 56 次正面。这个 56% 是稳定的偏好还是运气？把这 100 次结果有放回抽样 1000 遍，每遍重新数正面，看 56% 落在多大的区间里——如果区间是 [50%, 62%]，说明硬币基本公平；如果是 [54%, 58%]，那硬币可能真的有偏。
+          </p>
+          <p className="mt-1">
+            <strong>怎么读</strong>：研究结果里看到「Sharpe 1.5（CI: 0.8 - 2.1）」就是说：用同样的月度序列重组，Sharpe 大概率落在 0.8 到 2.1 之间。<strong>CI 越窄越可信</strong>，CI 跨越 0（比如 -0.2 to 1.8）就要警惕——可能是噪音。
+          </p>
+          <p className="mt-1">
+            <strong>本工具里</strong>：默认 1000 次抽样，用确定性 PRNG（mulberry32 + 固定种子）所以同一份数据每次跑结果一致。
+          </p>
+        </Concept>
+
+        <Concept name="🎯 样本内 vs 样本外（IS / OOS）">
+          <p>
+            <strong>是什么</strong>：把回测期切成<strong>前 70% / 后 30%</strong> 两段。前段是「样本内（In-Sample, IS）」，相当于训练集；后段是「样本外（Out-of-Sample, OOS）」，相当于真实考核。
+          </p>
+          <p className="mt-1">
+            <strong>类比</strong>：你给学生看 70% 的题做练习，期末考剩下 30% 的题。如果练习题平均 90 分但期末只考 60 分，说明他没真学会，只是把练习题背了。
+          </p>
+          <p className="mt-1">
+            <strong>怎么读</strong>：看 IS Sharpe vs OOS Sharpe。
+          </p>
+          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+            <li><strong>IS 1.8 / OOS 1.5</strong>：略掉一点，可以接受。OOS 通常会差一些，这是正常的</li>
+            <li><strong>IS 2.0 / OOS 0.3</strong>：严重过拟合，这个策略大概率不行</li>
+            <li><strong>IS 1.0 / OOS 1.4</strong>：OOS 反而更好？要么运气好、要么策略真的稳，再用别的检验交叉验证</li>
+          </ul>
+          <p className="mt-1">
+            <strong>本工具里</strong>：固定 70/30 split，OOS 是你最不熟悉的最近 30%——这能告诉你「按历史训练出来的策略，到了近期还灵不灵」。
+          </p>
+        </Concept>
+
+        <Concept name="📆 子区间分析（Subperiod Analysis）">
+          <p>
+            <strong>是什么</strong>：把整个回测期均分成两段（前半段 + 后半段），分别算 metric。
+          </p>
+          <p className="mt-1">
+            <strong>类比</strong>：你十年成绩单——前五年和后五年的平均分对比。如果前五年 80 后五年 60，要警惕：可能你不是变笨了，而是学校题变难了（市场环境变了）。
+          </p>
+          <p className="mt-1">
+            <strong>怎么读</strong>：看两段 Sharpe / CAGR 的差异。
+          </p>
+          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+            <li>差异小 → 策略在不同市场环境下都稳，鲁棒</li>
+            <li>差异大 → 策略对市场环境敏感，可能某段时间纯靠运气（比如赶上 QQQ 大涨）</li>
+          </ul>
+          <p className="mt-1">
+            <strong>本工具里</strong>：固定 50/50 split。和 IS/OOS 不冲突——一个查「最近行不行」，一个查「换个环境行不行」。
+          </p>
+        </Concept>
+
+        <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 text-sm text-emerald-900">
+          <strong>三个检验都通过 ≠ 一定赚钱</strong>，但通过 = 你排除了三个最常见的虚假信号。这是研究纪律的最低标准——任何「Sharpe 高得离谱、所有检验都不看」的策略，几乎都是过拟合。
+        </div>
+      </LearnSection>
+
+      {/* ============ Chapter 8 — 真实交易成本 ============ */}
+      <LearnSection
+        index={8}
+        title="真实交易成本：你回测时省掉了什么钱"
+        icon={<Coins className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          学术论文和入门教程经常把交易成本简化成「单边 5 bps」或者干脆 0。但真实交易里的成本是三层叠加的：买卖价差 + 市场冲击 + 佣金。你的策略<strong>表面上的 alpha</strong> 经常会被这三层吃掉一半甚至全部。
+        </Para>
+
+        <Concept name="📏 买卖价差（Spread）">
+          <p>
+            <strong>是什么</strong>：任何股票同一时刻都有买价（bid）和卖价（ask），中间有差。比如 AAPL 报价 buy 200.10 / sell 200.12，你买入立刻就「亏 2 分」——这就是 spread 成本。
+          </p>
+          <p className="mt-1">
+            <strong>量级感</strong>：
+          </p>
+          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+            <li><strong>超大盘股（mega cap，AAPL/MSFT/NVDA）</strong>：spread ~1 bps（0.01%），可忽略</li>
+            <li><strong>大盘股（large cap，市值 100-1000 亿）</strong>：~4 bps</li>
+            <li><strong>中盘股（mid cap，市值 20-100 亿）</strong>：~10 bps</li>
+            <li><strong>小盘股</strong>：30 bps 起跳，有时候 50+ bps</li>
+          </ul>
+        </Concept>
+
+        <Concept name="🌊 市场冲击（Market Impact）">
+          <p>
+            <strong>是什么</strong>：你下单的本身会推动价格。如果你想一次买 1000 万美元 NVDA，等你买完，它的价格已经比你下单时高一点了——这部分就是你自己造成的成本。
+          </p>
+          <p className="mt-1">
+            <strong>规律</strong>：冲击大约和 <strong>√（下单金额 ÷ 日成交额）</strong>成正比。简单理解：你买的金额相对市场容量越大，冲击越大；但是是平方根关系，不是线性，所以稍微分散一下能省不少。
+          </p>
+          <p className="mt-1">
+            <strong>类比</strong>：你在一个农贸市场要买 10 斤土豆，挑一家店就买完，老板会涨价；分 3 家店买，价格基本不动。市场冲击就是这个意思。
+          </p>
+          <p className="mt-1">
+            <strong>对个人投资者</strong>：一般下单几千到几万美金，冲击可以忽略不计——但**机构跑回测必须考虑**，否则 100 亿规模的策略上线会发现「赚的全没了」。
+          </p>
+        </Concept>
+
+        <Concept name="💵 佣金（Commission）">
+          <p>
+            <strong>是什么</strong>：券商收的费用。零售券商现在大多 0 佣金（IBKR Lite、Robinhood、富途等），机构是 0.5-2 bps 不等。
+          </p>
+          <p className="mt-1">
+            <strong>注意</strong>：零佣金不代表零成本——券商靠 PFOF（Payment For Order Flow，订单流卖给做市商）赚你的钱，体现为你的成交价稍微差一点（隐性成本）。这部分大概也是 1-2 bps，但你看不到。
+          </p>
+        </Concept>
+
+        <Concept name="🔄 换手率（Turnover）的放大效应">
+          <p>
+            <strong>是什么</strong>：单边交易成本 × 换手率 = 年化成本拖累。如果你的策略月度调仓、年换手 400%（每年所有持仓换 4 遍）+ 单边 10 bps，那么<strong>每年 80 bps（0.8%）</strong>从 alpha 里被扣掉。
+          </p>
+          <p className="mt-1">
+            <strong>实际意义</strong>：高频策略对成本极度敏感（因为换手率上千%），低频策略（年换手 50%以下）对成本基本不敏感。本工具默认月度再平衡 + 多因子 → 年换手通常 200-400%。
+          </p>
+        </Concept>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-900">
+          <strong>本工具的两种成本模型</strong>：
+          <ul className="list-disc pl-5 mt-1 space-y-0.5">
+            <li>
+              <strong>simple</strong>：你设的单边 bps × 换手率，简单粗暴，所有标的同价。适合快速试策略。
+            </li>
+            <li>
+              <strong>tiered</strong>（Phase 7+）：按流动性分层（mega/large/mid 三档）应用不同 spread + √turnover 市场冲击 + 你的佣金。更接近真实，回测结果会比 simple 模式低 0.5-2 个点。
+            </li>
+          </ul>
+          建研究时选哪个？早期探索用 simple，看到一个想认真上的策略再换 tiered 验证一下。如果换了模型 Sharpe 从 1.5 掉到 0.6，那就是<strong>策略其实经不起真实成本</strong>，别上。
+        </div>
+      </LearnSection>
+
+      {/* ============ Chapter 9 — 推荐资源清单 ============ */}
+      <LearnSection
+        index={9}
+        title="想再深入学一点？推荐资源清单"
+        icon={<Library className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          这份清单是「我会推荐自己朋友看」的版本，不是「应试」的版本。按难度从浅到深排，每本/每个都简短说明<strong>谁适合</strong>、<strong>解决什么问题</strong>。
+        </Para>
+
+        <Concept name="📚 入门书（不需要数学背景）">
+          <p>
+            <strong>《打开量化投资的黑箱》Rishi Narang</strong>（中信出版）
+          </p>
+          <p className="text-xs mt-0.5">
+            最薄、最白话的量化导论。看完你就知道「Two Sigma 和 D.E. Shaw 大概在干什么」。
+          </p>
+          <p className="mt-2">
+            <strong>《赤裸裸的统计学》Charles Wheelan</strong>
+          </p>
+          <p className="text-xs mt-0.5">
+            统计学入门读物，把回归、假设检验、p 值这些概念讲到不需要数学就能懂。看完再回头读量化论文不会怵。
+          </p>
+        </Concept>
+
+        <Concept name="📖 进阶书（需要点统计 / Python 基础）">
+          <p>
+            <strong>《Quantitative Equity Portfolio Management》Chincarini & Kim</strong>
+          </p>
+          <p className="text-xs mt-0.5">
+            因子模型最系统的教材，从 CAPM 到 Fama-French 三因子 / 五因子全覆盖。本工具的多因子框架就是这套理论的简化实现。
+          </p>
+          <p className="mt-2">
+            <strong>《Advances in Financial Machine Learning》Marcos López de Prado</strong>
+          </p>
+          <p className="text-xs mt-0.5">
+            如果你想把 ML 用到量化里，这是必读。第 7 章「Cross-Validation in Finance」专门讲为什么金融数据不能用传统 K-fold CV——和本工具的 IS/OOS 设计有直接关系。
+          </p>
+          <p className="mt-2">
+            <strong>《Python for Finance》Yves Hilpisch</strong>
+          </p>
+          <p className="text-xs mt-0.5">
+            想自己写代码跑回测时的工具书。讲 pandas、numpy 在金融场景的用法，能跟 yfinance / SEC EDGAR 这些数据源对接。
+          </p>
+        </Concept>
+
+        <Concept name="🎓 学术论文（要看「源头」时）">
+          <ul className="list-disc pl-5 space-y-0.5 text-xs">
+            <li>
+              <strong>Jegadeesh & Titman (1993)</strong>：动量因子开山之作。&quot;Returns to Buying Winners and Selling Losers&quot;
+            </li>
+            <li>
+              <strong>Fama & French (1992)</strong>：&quot;The Cross-Section of Expected Stock Returns&quot;，价值因子 + 三因子模型。
+            </li>
+            <li>
+              <strong>Fama & French (2015)</strong>：五因子升级（加质量 + 投资）。
+            </li>
+            <li>
+              <strong>Frazzini & Pedersen (2014)</strong>：&quot;Betting Against Beta&quot;，低波因子。
+            </li>
+            <li>
+              <strong>Asness, Frazzini & Pedersen (2019)</strong>：&quot;Quality Minus Junk&quot;，质量因子最完整版。
+            </li>
+          </ul>
+          <p className="text-xs mt-1 text-gray-500">
+            上面这些都能在 SSRN 或 Google Scholar 免费搜到全文，不用付钱。
+          </p>
+        </Concept>
+
+        <Concept name="🌐 中文社区 / 公众号">
+          <ul className="list-disc pl-5 space-y-0.5 text-xs">
+            <li>
+              <strong>「川总写量化」</strong>（公众号 / 知识星球）：石川博士，价值取向，文风扎实，适合长期看。
+            </li>
+            <li>
+              <strong>「集思录」</strong>：散户量化讨论社区，A 股场景多，看可转债 / 套利 / 网格策略很有用。
+            </li>
+            <li>
+              <strong>「优矿 / JoinQuant / 米筐」</strong>：国内三大量化平台，文档区有大量入门教程 + 因子复现笔记。
+            </li>
+          </ul>
+        </Concept>
+
+        <Concept name="🌍 英文社区 / 博客">
+          <ul className="list-disc pl-5 space-y-0.5 text-xs">
+            <li>
+              <strong>QuantConnect 论坛</strong>：策略实现讨论，能看到大量带回测代码的讨论。
+            </li>
+            <li>
+              <strong>SSRN「FNANC: Financial Economics」</strong>：最新量化论文聚集地。
+            </li>
+            <li>
+              <strong>Robert Carver 的 blog (qoppac.blogspot.com)</strong>：前 AHL 量化经理，写了《Systematic Trading》，博客里讲很多实战细节。
+            </li>
+            <li>
+              <strong>Quantopian Lectures（已归档）</strong>：Quantopian 倒闭了但课程还在 GitHub，是公开课里最系统的量化课程。
+            </li>
+          </ul>
+        </Concept>
+
+        <Concept name="🛠️ 数据源 / 工具">
+          <ul className="list-disc pl-5 space-y-0.5 text-xs">
+            <li>
+              <strong>Yahoo Finance（yfinance）</strong>：免费，月度/日度调整收盘价。本工具用的就是它。
+            </li>
+            <li>
+              <strong>SEC EDGAR companyfacts API</strong>：免费，所有美股 10-K / 10-Q 财报。本工具的质量因子 / PIT 价值因子的来源。
+            </li>
+            <li>
+              <strong>FRED（Federal Reserve Economic Data）</strong>：宏观数据（利率、CPI、失业率），免费。
+            </li>
+            <li>
+              <strong>Tushare / AkShare</strong>：A 股和港股数据，免费版够用。
+            </li>
+            <li>
+              <strong>WRDS</strong>：学术研究金标准，但要大学订阅。如果有访问权限，覆盖率和准确度都是免费数据没法比的。
+            </li>
+          </ul>
+        </Concept>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-900">
+          <strong>学习路径建议</strong>：先看完《打开量化投资的黑箱》对整个领域有个全貌 → 在本工具里跑 5-10 个研究、对照量化入门 1-5 章理解每个指标 → 看《Quantitative Equity Portfolio Management》前 5 章把因子模型打牢 → 找 1-2 篇原论文（推荐从 Fama-French 1992 开始）读完整版，体会「严谨研究长啥样」→ 最后如果还有兴趣，看 López de Prado 学怎么把 ML 引入。
+        </div>
+      </LearnSection>
     </div>
   );
 }
