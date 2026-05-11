@@ -45,6 +45,22 @@ interface ChangelogEntry {
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "Phase 12 · Paper 月度调仓提醒",
+    date: "2026-05-11",
+    title: "Paper 组合每月自动重算 + Telegram 推送，仅建议、不自动改",
+    summary:
+      "Paper 之前是开仓后就 buy-and-hold 一直放着，看起来\"省心\"但实际上策略可能早就该换股票了。这个版本加了月度调度器：每月初系统重新跑你的策略、把\"该买什么、该卖什么\"算出来，写到该 Paper 组合下做成「待处理」并通过 Telegram 推一份消息给你。重要前提：仅建议，不自动改持仓——必须你点「确认调仓」才会更新，避免脚本 bug 默默把组合弄乱。",
+    highlights: [
+      "新表 PaperRebalanceAdvice，每月 1 行记录建议持仓 vs 当前持仓 + 加入/卖出 diff",
+      "/api/cron/paper-advice 受 CRON_SECRET 保护，遍历所有未归档组合 → 写表 → 发 Telegram",
+      "Telegram 通知客户端：sendTelegram() + formatAdviceMessage()，未配置 token 时静默 no-op",
+      "Paper 列表页加「待处理」红点 + 展开看 diff 后点「确认调仓」或「跳过本次」",
+      "/api/paper/[id]/advice 列表 + PATCH /[adviceId] 原子更新 advice 状态 + 组合持仓",
+      "纯函数测试：diffTickerSets / tickerSetsEqual / formatAdviceMessage / isRebalanceMonth 共 +24 个用例",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
     version: "Phase 11 · 量化入门科普",
     date: "2026-05-11",
     title: "「关于」加第三个 tab，把报告里的所有术语用大白话讲清楚",
@@ -1201,6 +1217,36 @@ function LearnGuide() {
 
         <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 text-sm text-emerald-900">
           <strong>怎么验证你跑的研究是 PIT 的</strong>：完成的研究 →「概览」tab → 顶部「数据质量与偏差」面板 →「因子类型」字段。看到「全 PIT 多因子」就是 Phase 5+ 流程，写「混合 PIT」是 Phase 4.2 流程（Quality 是 PIT，Value 不是）。
+        </div>
+      </LearnSection>
+
+      {/* ============ Chapter 5 — Paper 月度调仓提醒（Phase 12） ============ */}
+      <LearnSection
+        index={5}
+        title="Paper 月度调仓提醒怎么用"
+        icon={<Lightbulb className="h-4 w-4 text-blue-600" />}
+      >
+        <Para>
+          研究跑完之后你可以「转 Paper 组合」，这个组合会一直跟着 Yahoo 最新价更新市值。但<strong>策略本身是会变的</strong>——动量因子下个月会看到不同的领涨股，价值因子会看到不同的便宜股。如果你开仓后就放着不管，几个月后这个组合其实跟你的策略已经没关系了。
+        </Para>
+        <Para>
+          所以 Phase 12 加了月度提醒：
+        </Para>
+        <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1">
+          <li>每月初系统自动重跑你的策略，看「现在该持仓什么」</li>
+          <li>跟你 Paper 当前的持仓对比 → 算出「加入哪几只 / 卖出哪几只」</li>
+          <li>把这条「建议」写到 Paper 组合下，状态是<strong>待处理</strong></li>
+          <li>同时通过 Telegram 推一份消息给你（前提是你配过 bot token）</li>
+        </ul>
+        <Para>
+          你看到提醒后有两个选择：
+        </Para>
+        <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1">
+          <li><strong>确认调仓</strong>：Paper 持仓被更新成最新推荐，等权重新分配</li>
+          <li><strong>跳过本次</strong>：记一笔说你看过了但不动，下个月再说</li>
+        </ul>
+        <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-900">
+          <strong>为什么不自动调？</strong>因为脚本 bug 默默把你的组合改掉是噩梦。「先建议、你点确认」是研究项目里更安全的默认。等用了几个月觉得放心了，未来可以加一个「这个 Paper 我授权自动调」的选项。
         </div>
       </LearnSection>
 

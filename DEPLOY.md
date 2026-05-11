@@ -105,6 +105,16 @@ AUTH_GITHUB_SECRET=
 DEEPSEEK_API_KEY=
 # 可选：默认 deepseek-chat，可改成 deepseek-reasoner
 AI_MODEL=
+
+# Phase 12: Paper 月度调仓提醒 + Telegram
+# CRON_SECRET 保护 /api/cron/paper-advice 端点。openssl rand -hex 32。
+CRON_SECRET=
+# Telegram bot token（@BotFather）+ chat ID（getUpdates）。
+# 留空时调度器照常跑，只是不发推送。
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+# 可选：消息里的「查看详情」链接前缀，默认 https://aiquant.org
+APP_URL=
 ```
 
 `.env` 已在 `.gitignore` 中，**绝不要**提交进 Git。
@@ -236,7 +246,40 @@ pm2 reload ai-quant-copilot
 
 ---
 
-## 十一、（可选）GitHub Actions 自动部署
+## 十一、Phase 12：Paper 月度调仓 Cron
+
+每月 1 号触发一次 `/api/cron/paper-advice`，让系统遍历所有未归档 Paper 组合、重算策略、写「待处理」建议并推 Telegram。
+
+```bash
+# 编辑 root crontab
+crontab -e
+```
+
+加这一行（UTC 时间 09:00 = 北京时间 17:00）：
+
+```
+0 9 1 * * curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" https://aiquant.org/api/cron/paper-advice >> /var/log/paper-advice-cron.log 2>&1
+```
+
+注意：crontab 不会自动加载 shell env，所以 `$CRON_SECRET` 要么直接写明文密钥，要么在 crontab 顶部 `CRON_SECRET=...` 声明。
+
+手动验证（dry-run）：
+
+```bash
+curl -H "X-Cron-Secret: $CRON_SECRET" https://aiquant.org/api/cron/paper-advice
+# 期望 200 + { activePortfolios: N, telegramEnabled: true|false }
+```
+
+手动触发一次完整运行：
+
+```bash
+curl -X POST -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json" \
+  -d '{}' https://aiquant.org/api/cron/paper-advice
+```
+
+---
+
+## 十二、（可选）GitHub Actions 自动部署
 
 每次 push 到 main 自动部署。在仓库添加 `.github/workflows/deploy.yml`：
 

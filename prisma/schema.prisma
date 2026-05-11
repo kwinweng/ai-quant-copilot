@@ -25,6 +25,8 @@ model User {
   studies       Study[]
   // Phase 10 — paper trading portfolios derived from completed studies.
   paperPortfolios PaperPortfolio[]
+  // Phase 12 — monthly rebalance advice (deduped by user via portfolio FK).
+  paperAdvices    PaperRebalanceAdvice[]
   createdAt     DateTime  @default(now())
 }
 
@@ -243,12 +245,70 @@ model PaperPortfolio {
   // Optional: archived hides it from the default list view.
   archived        Boolean  @default(false)
   notes           String?  @db.Text
+  // Phase 12 — monthly rebalance advice. One PaperPortfolio has many
+  // PaperRebalanceAdvice rows, at most one per (portfolio, suggestedMonth).
+  advices         PaperRebalanceAdvice[]
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([userId, archived])
   @@index([sourceStudyId])
+}
+
+// ============================================================
+// Phase 12 — Paper rebalance advice (scheduler + Telegram)
+// ============================================================
+//
+// The monthly scheduler re-runs each active PaperPortfolio's source study
+// against the latest fully-closed month and writes a PaperRebalanceAdvice
+// row capturing the diff between currently-held tickers and the strategy's
+// recommendation. We notify via Telegram and surface a "pending" badge in
+// the UI. The user can then `confirm` (which updates the portfolio's
+// holdings + bumps sourceRebalanceDate) or `skip`. Status defaults to
+// `pending`. We do NOT auto-rebalance — this keeps the user in the loop
+// and protects against scheduler bugs silently scrambling a portfolio.
+enum PaperAdviceStatus {
+  pending
+  confirmed
+  skipped
+}
+
+model PaperRebalanceAdvice {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paperPortfolioId  String
+  paperPortfolio    PaperPortfolio @relation(fields: [paperPortfolioId], references: [id], onDelete: Cascade)
+  // YYYY-MM the advice was generated FOR (the "decision month" — the last
+  // fully-closed month the scheduler could see when it ran).
+  suggestedMonth    String
+  // The strategy's recommended holdings at suggestedMonth, equal-weighted.
+  suggestedTickers  String[]
+  // What the portfolio was holding at the time advice was generated.
+  currentTickers    String[]
+  // Pre-computed diff sets for fast UI + Telegram rendering.
+  addedTickers      String[]
+  removedTickers    String[]
+  // Optional: average composite z-score of the suggested holdings, useful
+  // for "the strategy is very bullish / neutral" context lines. Nullable
+  // because legacy momentum-only studies won't have a composite figure.
+  avgScore          Float?
+  status            PaperAdviceStatus @default(pending)
+  // When the user acted on the advice (confirmed or skipped). Null while pending.
+  actedAt           DateTime?
+  // Optional: short note describing why the advice was generated (e.g.
+  // "monthly cadence", "manual trigger"). Free text for the audit trail.
+  reason            String?  @db.Text
+  // Telegram delivery audit — null if disabled / missing config / failed.
+  notifiedAt        DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([paperPortfolioId, suggestedMonth])
+  @@index([userId, status])
+  @@index([paperPortfolioId, status])
 }
 
 // Per-user per-day AI call counters for cheap rate limiting. We don't need a
