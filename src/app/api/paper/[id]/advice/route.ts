@@ -17,9 +17,14 @@ export async function GET(_req: Request, ctx: Ctx) {
       select: { id: true },
     });
     if (!portfolio) return notFound("Paper portfolio not found");
+    // Pending-first ordering: `actedAt` is null for pending rows and set for
+    // confirmed/skipped, so `actedAt asc nulls first` naturally floats pending
+    // to the top. Within a status, newest month wins. Don't sort by `status`
+    // directly — that's the PG enum and alphabetical order would put
+    // `confirmed` before `pending`, which is the opposite of what we want.
     const advices = await prisma.paperRebalanceAdvice.findMany({
       where: { paperPortfolioId: id, userId: session!.user.id },
-      orderBy: [{ status: "asc" }, { suggestedMonth: "desc" }],
+      orderBy: [{ actedAt: { sort: "asc", nulls: "first" } }, { suggestedMonth: "desc" }],
     });
     return NextResponse.json({ advices });
   } catch (err) {
