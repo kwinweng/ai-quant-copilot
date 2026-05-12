@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Study, PaperPortfolio } from "@prisma/client";
-import { computeCurrentAdvice } from "@/lib/paper/scheduler";
+import { computeCurrentAdvice, isRebalanceMonth } from "@/lib/paper/scheduler";
 import { diffTickerSets, tickerSetsEqual } from "@/lib/paper/adviceDiff";
 import type { PortfolioHolding } from "@/lib/paper/valuation";
 import {
@@ -26,7 +26,13 @@ import {
 interface ProcessReport {
   portfolioId: string;
   portfolioTitle: string;
-  status: "wrote" | "duplicate" | "skipped-no-change" | "skipped-no-study" | "error";
+  status:
+    | "wrote"
+    | "duplicate"
+    | "skipped-no-change"
+    | "skipped-no-study"
+    | "skipped-off-cadence"
+    | "error";
   asOfMonth?: string;
   added?: string[];
   removed?: string[];
@@ -71,6 +77,28 @@ async function processPortfolio(
     }
 
     const suggestedMonth = forceMonth ?? advice.asOfMonth;
+
+    // Honor the source study's rebalance cadence. A quarterly-rebalance study
+    // should only generate advice every 3 months relative to the portfolio's
+    // anchor (sourceRebalanceDate). Monthly studies pass the gate trivially
+    // (cadence=1 → every month qualifies). forceMonth bypasses cadence — it's
+    // a manual trigger, the caller knows what they're asking for.
+    if (
+      !forceMonth &&
+      !isRebalanceMonth(
+        study.rebalance,
+        portfolio.sourceRebalanceDate,
+        suggestedMonth,
+      )
+    ) {
+      return {
+        ...base,
+        status: "skipped-off-cadence",
+        asOfMonth: suggestedMonth,
+        message: `Study cadence ${study.rebalance} — next rebalance is not this month`,
+      };
+    }
+
     const holdings = (portfolio.holdings as unknown as PortfolioHolding[]) ?? [];
     const currentTickers = holdings.map((h) => h.ticker);
 

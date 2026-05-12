@@ -30,4 +30,29 @@ describe("isRebalanceMonth", () => {
   it("unknown label defaults to monthly cadence (cadence=1)", () => {
     expect(isRebalanceMonth("totally-bogus", "2024-01", "2024-05")).toBe(true);
   });
+
+  // Regression: ISSUE-001 — cron ignored study rebalance cadence
+  // Found by /qa on 2026-05-12
+  // Report: .gstack/qa-reports/qa-report-aiquant-2026-05-12.md
+  //
+  // The production-active study uses 中文 label "季度" (quarterly), which
+  // REBALANCE_MONTHS maps to cadence=3. Previously isRebalanceMonth was
+  // exported but never called by the cron route — so quarterly portfolios
+  // got an "advice" written every month instead of every 3 months. The
+  // fix wires isRebalanceMonth into processPortfolio(). This test guards
+  // the helper's handling of the Chinese cadence label end-to-end.
+  it("handles Chinese cadence labels (季度 → 3-month cadence)", () => {
+    expect(isRebalanceMonth("季度", "2026-02", "2026-02")).toBe(true);
+    expect(isRebalanceMonth("季度", "2026-02", "2026-05")).toBe(true);
+    expect(isRebalanceMonth("季度", "2026-02", "2026-08")).toBe(true);
+    expect(isRebalanceMonth("季度", "2026-02", "2026-03")).toBe(false);
+    expect(isRebalanceMonth("季度", "2026-02", "2026-04")).toBe(false);
+    expect(isRebalanceMonth("季度", "2026-02", "2026-06")).toBe(false);
+  });
+
+  it("handles Chinese monthly label (月度 → every month)", () => {
+    expect(isRebalanceMonth("月度", "2026-02", "2026-02")).toBe(true);
+    expect(isRebalanceMonth("月度", "2026-02", "2026-03")).toBe(true);
+    expect(isRebalanceMonth("月度", "2026-02", "2027-01")).toBe(true);
+  });
 });
