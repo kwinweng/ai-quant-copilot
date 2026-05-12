@@ -238,16 +238,28 @@ export async function POST(req: NextRequest) {
     // Audit-trail: mark notifiedAt on the rows we just wrote IF the push
     // succeeded. (If Telegram returns 4xx, leave notifiedAt null so the
     // UI badge still shows pending.)
+    //
+    // Use per-row updates (not a single updateMany with two `in` clauses)
+    // because the latter forms a cartesian product across portfolios × months
+    // and could mark stale rows from prior runs whose (portfolio, month) just
+    // happens to be in the cross-product set. The unique constraint
+    // (paperPortfolioId, suggestedMonth) makes each update target exactly
+    // one row.
     if (result.sent) {
-      const portfolioIds = writtenReports.map((r) => r.portfolioId);
-      await prisma.paperRebalanceAdvice.updateMany({
-        where: {
-          paperPortfolioId: { in: portfolioIds },
-          suggestedMonth: { in: writtenReports.map((r) => r.asOfMonth!) },
-          notifiedAt: null,
-        },
-        data: { notifiedAt: new Date() },
-      });
+      const now = new Date();
+      await prisma.$transaction(
+        writtenReports.map((r) =>
+          prisma.paperRebalanceAdvice.update({
+            where: {
+              paperPortfolioId_suggestedMonth: {
+                paperPortfolioId: r.portfolioId,
+                suggestedMonth: r.asOfMonth!,
+              },
+            },
+            data: { notifiedAt: now },
+          }),
+        ),
+      );
     }
   }
 
