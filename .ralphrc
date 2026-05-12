@@ -3,7 +3,7 @@
 # Documentation: https://github.com/frankbria/ralph-claude-code
 
 # Project identification
-PROJECT_NAME="Warp"
+PROJECT_NAME="AI_Quant_Copilot"
 PROJECT_TYPE="typescript"
 
 # Claude Code CLI command
