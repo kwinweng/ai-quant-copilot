@@ -110,6 +110,14 @@ interface ApiResult {
   robustness?: Robustness | null;
   // Phase 9 — multi-benchmark OLS attribution. null on legacy studies.
   benchmarkAttribution?: BenchmarkAttribution | null;
+  // Phase 14 — per-rebalance sector allocation series. null on legacy studies
+  // and on new studies that didn't enable constraints.
+  sectorAllocation?: SectorAllocationEntry[] | null;
+}
+
+interface SectorAllocationEntry {
+  date: string;
+  sectors: Record<string, number>;
 }
 
 interface BenchmarkAttribution {
@@ -921,6 +929,74 @@ function BestWorstMonthsCard({
             <tbody>{worst.map(renderRow)}</tbody>
           </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SectorAllocationCard({
+  series,
+}: {
+  series?: SectorAllocationEntry[] | null;
+}) {
+  if (!series || series.length === 0) return null;
+  const latest = series[series.length - 1];
+  const sectors = Object.entries(latest.sectors).sort((a, b) => b[1] - a[1]);
+  const total = sectors.reduce((s, [, w]) => s + w, 0) || 1;
+  const palette: Record<string, string> = {
+    Tech: "#3b82f6",
+    Financials: "#10b981",
+    Healthcare: "#f59e0b",
+    "Consumer Discretionary": "#a855f7",
+    "Consumer Staples": "#06b6d4",
+    Energy: "#ef4444",
+    Industrials: "#6366f1",
+    Communications: "#ec4899",
+    Unknown: "#9ca3af",
+  };
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">行业分布（最新调仓）</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          作为 {latest.date} 调仓后的 sector 权重；Phase 14 风险约束生效时才出现
+        </p>
+      </div>
+      <div className="px-4 py-4 space-y-3">
+        {/* Horizontal stacked bar */}
+        <div className="h-3 w-full rounded-full overflow-hidden flex bg-gray-100">
+          {sectors.map(([s, w]) => (
+            <div
+              key={s}
+              className="h-full"
+              style={{
+                width: `${(w / total) * 100}%`,
+                backgroundColor: palette[s] ?? "#94a3b8",
+              }}
+              title={`${s}: ${(w * 100).toFixed(1)}%`}
+            />
+          ))}
+        </div>
+        {/* Legend */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1.5">
+          {sectors.map(([s, w]) => (
+            <div key={s} className="flex items-center gap-1.5 text-xs">
+              <span
+                className="inline-block w-2.5 h-2.5 rounded-sm"
+                style={{ backgroundColor: palette[s] ?? "#94a3b8" }}
+              />
+              <span className="text-gray-700 flex-1 truncate">{s}</span>
+              <span className="text-gray-500 font-mono tabular-nums">
+                {(w * 100).toFixed(1)}%
+              </span>
+            </div>
+          ))}
+        </div>
+        {series.length > 1 && (
+          <p className="text-[11px] text-gray-400 pt-2 border-t border-gray-100">
+            历史共 {series.length} 次调仓，每次的板块分布写入结果数据
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1834,6 +1910,7 @@ export default function ResultPage() {
 
       {activeTab === "holdings" && (
         <div className="space-y-5">
+          <SectorAllocationCard series={result.sectorAllocation} />
           <FactorBreakdownCard data={result.factorBreakdown} />
           <RebalanceHistoryCard history={result.rebalanceHistory} />
         </div>

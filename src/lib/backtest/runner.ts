@@ -453,6 +453,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         universe: true,
         factorMix: true,
         costModel: true,
+        constraints: true,
       },
     });
     if (!study) {
@@ -661,6 +662,17 @@ export async function runBacktest(studyId: string): Promise<void> {
     // Phase 7: pass costMode so engine applies tiered model when configured.
     const costMode =
       study.costModel === "tiered" ? "tiered" : "simple";
+    // Phase 14: pull constraints off Study row. Stored as Json so the shape
+    // is permissive — narrow to a typed object before passing down. Legacy
+    // rows have `{}` which equals "no constraints" → engine takes its
+    // original equal-weight path.
+    const constraints = study.constraints && typeof study.constraints === "object"
+      ? (study.constraints as {
+          maxPositionWeight?: number;
+          maxSectorWeight?: number;
+          optimizer?: "equal_weight" | "min_var";
+        })
+      : {};
     const path = runEngine({
       prices,
       benchmark,
@@ -670,6 +682,7 @@ export async function runBacktest(studyId: string): Promise<void> {
       rebalanceMonths: rebalanceMonthsOf(study.rebalance),
       txCostBps: study.txCostBps,
       costMode,
+      constraints,
     });
     if (path.equity.length < 2) {
       throw new Error(
@@ -877,7 +890,20 @@ export async function runBacktest(studyId: string): Promise<void> {
       holdings: r.holdings,
       turnover: r.turnover,
       txCostApplied: r.txCostApplied,
+      // Phase 14: pass through optional weights + sector allocation when
+      // constraints are in effect. Legacy rebalances leave these undefined.
+      weights: r.weights,
+      sectorAllocation: r.sectorAllocation,
+      constrained: r.constrained,
     }));
+    // Phase 14: separate top-level sectorAllocation time series so the UI
+    // can render a sector mix chart without scanning rebalanceHistory.
+    const sectorAllocation = path.rebalances
+      .filter((r) => r.sectorAllocation)
+      .map((r) => ({
+        date: r.date,
+        sectors: r.sectorAllocation!,
+      }));
     const missingTickers = Object.entries(prices)
       .filter(([, m]) => m.size === 0)
       .map(([t]) => t);
@@ -944,6 +970,12 @@ export async function runBacktest(studyId: string): Promise<void> {
       benchmarkAttribution: benchmarkAttribution
         ? (benchmarkAttribution as unknown as Prisma.InputJsonValue)
         : Prisma.DbNull,
+      // Phase 14: per-rebalance sector allocation series. Empty array when no
+      // constraints were configured (legacy / equal-weight path).
+      sectorAllocation:
+        sectorAllocation.length > 0
+          ? (sectorAllocation as unknown as Prisma.InputJsonValue)
+          : Prisma.DbNull,
     };
     await prisma.studyResult.upsert({
       where: { studyId },

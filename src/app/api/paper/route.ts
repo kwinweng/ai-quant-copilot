@@ -86,6 +86,10 @@ export async function POST(req: NextRequest) {
       holdings: string[];
       turnover?: number;
       txCostApplied?: number;
+      // Phase 14: when a study runs with risk constraints, the engine emits
+      // the post-constraint weights so the paper portfolio can inherit them
+      // instead of falling back to equal weight.
+      weights?: Record<string, number>;
     }>;
     if (rebalances.length === 0) {
       return badRequest(
@@ -97,7 +101,13 @@ export async function POST(req: NextRequest) {
     if (tickers.length === 0) {
       return badRequest("Last rebalance has no holdings");
     }
-    const holdings = equalWeight(tickers);
+    // Phase 14: prefer constrained weights when the source study used them;
+    // otherwise fall back to equal weight (legacy default for momentum-only
+    // studies and pre-Phase-14 results).
+    const holdings =
+      last.weights && Object.keys(last.weights).length > 0
+        ? last.weights
+        : equalWeight(tickers);
     const titleResolved =
       body.title?.trim() || `Paper · ${study.title}`.slice(0, 200);
 

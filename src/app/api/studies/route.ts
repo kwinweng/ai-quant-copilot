@@ -100,6 +100,12 @@ interface CreateStudyBody {
   txCostBps?: number;
   factorMix?: string;
   costModel?: string;
+  // Phase 14: portfolio risk constraints. Optional — absent means equal-weight
+  // (legacy behavior). Both fractions in [0, 1]; 0.2 = 20% cap.
+  constraints?: {
+    maxPositionWeight?: number;
+    maxSectorWeight?: number;
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -125,7 +131,29 @@ export async function POST(req: NextRequest) {
     txCostBps,
     factorMix = "momentum",
     costModel = "tiered",
+    constraints,
   } = body;
+
+  // Phase 14: validate constraint bounds defensively. We accept any subset of
+  // fields; missing → no cap. Out-of-range values are rejected rather than
+  // silently clamped so the client gets clear feedback.
+  let normalizedConstraints: { maxPositionWeight?: number; maxSectorWeight?: number } = {};
+  if (constraints && typeof constraints === "object") {
+    if (constraints.maxPositionWeight != null) {
+      const mp = Number(constraints.maxPositionWeight);
+      if (!Number.isFinite(mp) || mp <= 0 || mp > 1) {
+        return badRequest("constraints.maxPositionWeight must be in (0, 1]");
+      }
+      normalizedConstraints.maxPositionWeight = mp;
+    }
+    if (constraints.maxSectorWeight != null) {
+      const ms = Number(constraints.maxSectorWeight);
+      if (!Number.isFinite(ms) || ms <= 0 || ms > 1) {
+        return badRequest("constraints.maxSectorWeight must be in (0, 1]");
+      }
+      normalizedConstraints.maxSectorWeight = ms;
+    }
+  }
 
   if (factorMix !== "momentum" && factorMix !== "multifactor") {
     return badRequest("factorMix must be 'momentum' or 'multifactor'");
@@ -173,6 +201,7 @@ export async function POST(req: NextRequest) {
         txCostBps,
         factorMix,
         costModel,
+        constraints: normalizedConstraints,
       },
     });
     return NextResponse.json({ study }, { status: 201 });

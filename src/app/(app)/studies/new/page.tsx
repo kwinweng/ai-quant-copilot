@@ -48,8 +48,12 @@ function NewStudyForm() {
   const [txCost, setTxCost] = useState("5");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [slippage, setSlippage] = useState("1");
-  const [maxPosition, setMaxPosition] = useState("5");
   const [longShort, setLongShort] = useState("仅做多");
+  // Phase 14: portfolio risk constraints. Disabled by default to preserve
+  // legacy equal-weight behavior for users who don't opt in.
+  const [enableConstraints, setEnableConstraints] = useState(false);
+  const [maxPositionPct, setMaxPositionPct] = useState("20");
+  const [maxSectorPct, setMaxSectorPct] = useState("35");
   const [factorMix, setFactorMix] = useState<"momentum" | "multifactor">(
     "momentum",
   );
@@ -145,6 +149,16 @@ function NewStudyForm() {
           // Phase 7: new studies default to the realistic tiered cost model.
           // Server still accepts "simple" for parity with old API behavior.
           costModel: "tiered",
+          // Phase 14: only send constraints if user explicitly enabled them.
+          // Empty object preserves legacy equal-weight behavior.
+          ...(enableConstraints
+            ? {
+                constraints: {
+                  maxPositionWeight: Number(maxPositionPct) / 100,
+                  maxSectorWeight: Number(maxSectorPct) / 100,
+                },
+              }
+            : {}),
         }),
       });
       if (!res.ok) {
@@ -418,7 +432,7 @@ function NewStudyForm() {
             )}
           </button>
           {showAdvanced && (
-            <div className="px-4 pb-4 pt-2 border-t border-gray-100">
+            <div className="px-4 pb-4 pt-2 border-t border-gray-100 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className={labelCls}>滑点（bps）</label>
@@ -428,17 +442,6 @@ function NewStudyForm() {
                     className={inputCls}
                     value={slippage}
                     onChange={(e) => setSlippage(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>单票最大仓位（%）</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    className={inputCls}
-                    value={maxPosition}
-                    onChange={(e) => setMaxPosition(e.target.value)}
                   />
                 </div>
                 <div>
@@ -453,6 +456,59 @@ function NewStudyForm() {
                     <option>市场中性</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Phase 14 — portfolio risk constraints */}
+              <div className="border-t border-gray-100 pt-4">
+                <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={enableConstraints}
+                    onChange={(e) => setEnableConstraints(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-medium text-gray-700">
+                    启用风险约束（行业 + 单仓上限）
+                  </span>
+                </label>
+                <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
+                  不启用 = 经典等权篮子，所有 Top 20% 标的等权重持有。<br />
+                  启用 = 应用单仓上限和行业上限后再归一化，结果更接近真实资金经理的组合（Phase 14）。
+                </p>
+                {enableConstraints && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelCls}>单仓上限（%）</label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="100"
+                        step="1"
+                        className={inputCls}
+                        value={maxPositionPct}
+                        onChange={(e) => setMaxPositionPct(e.target.value)}
+                      />
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        单只标的的最大权重，默认 20%
+                      </p>
+                    </div>
+                    <div>
+                      <label className={labelCls}>行业上限（%）</label>
+                      <input
+                        type="number"
+                        min="15"
+                        max="100"
+                        step="1"
+                        className={inputCls}
+                        value={maxSectorPct}
+                        onChange={(e) => setMaxSectorPct(e.target.value)}
+                      />
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        同一 GICS 板块的累计权重上限，默认 35%
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

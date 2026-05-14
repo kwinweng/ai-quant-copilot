@@ -5,6 +5,11 @@ import {
   type CostFunction,
   type CostMode,
 } from "./costModel";
+import {
+  applyConstraints,
+  type PortfolioConstraints,
+} from "@/lib/portfolio/constraints";
+import { sectorAllocationFromWeights } from "@/lib/portfolio/sectorMap";
 
 export interface BacktestInput {
   prices: MonthlyPrices;
@@ -20,6 +25,10 @@ export interface BacktestInput {
   // "tiered" applies per-ticker liquidity-tier spreads + sqrt(turnover)
   // market impact + user commission on top.
   costMode?: CostMode;
+  // Phase 14: optional portfolio risk constraints (single-position cap,
+  // sector cap). Empty / undefined preserves the original equal-weight
+  // behavior so old studies replay bit-for-bit.
+  constraints?: PortfolioConstraints;
 }
 
 export interface MonthlyEquityPoint {
@@ -40,6 +49,11 @@ export interface RebalanceEvent {
   holdings: string[];
   turnover: number; // 0..1, one-way fraction of portfolio replaced
   txCostApplied: number; // fractional drag (e.g. 0.0006 for 6 bps)
+  // Phase 14: present when constraints are configured. Records the actual
+  // weights + sector mix used for this rebalance after caps applied.
+  weights?: Record<string, number>;
+  sectorAllocation?: Record<string, number>;
+  constrained?: boolean;
 }
 
 export interface BacktestPath {
@@ -110,8 +124,20 @@ export function runBacktest(input: BacktestInput): BacktestPath {
     txCostBps,
     topQuintilePct = 0.2,
     costMode = "simple",
+    constraints,
   } = input;
   const costFn: CostFunction = costFunctionForMode(costMode);
+  // Phase 14: detect whether any cap is actually configured so we can keep
+  // the legacy equal-weight code path unchanged when constraints are absent
+  // (guarantees bit-for-bit reproducibility of old studies).
+  const hasConstraints =
+    !!constraints &&
+    (
+      (typeof constraints.maxPositionWeight === "number" &&
+        constraints.maxPositionWeight < 1) ||
+      (typeof constraints.maxSectorWeight === "number" &&
+        constraints.maxSectorWeight < 1)
+    );
 
   const fullAxis = buildMonthAxis(startDate, endDate);
   const tickers = Object.keys(scores);
@@ -170,9 +196,17 @@ export function runBacktest(input: BacktestInput): BacktestPath {
     if (isRebalance) {
       const ranked = rankByFactor(scores, decisionMonth);
       const picks = topNFromRanked(ranked, topN);
-      const w: PortfolioWeights = {};
-      const each = picks.length > 0 ? 1 / picks.length : 0;
-      for (const t of picks) w[t] = each;
+      let w: PortfolioWeights;
+      let wasConstrained = false;
+      if (hasConstraints) {
+        const applied = applyConstraints(picks, constraints!);
+        w = applied.weights;
+        wasConstrained = applied.constrained;
+      } else {
+        w = {};
+        const each = picks.length > 0 ? 1 / picks.length : 0;
+        for (const t of picks) w[t] = each;
+      }
       const turnover = diffWeights(weights, w);
       // Phase 7: drag now goes through the configured cost model (simple
       // = uniform bps × turnover; tiered = per-ticker spread + sqrt-impact +
@@ -186,12 +220,21 @@ export function runBacktest(input: BacktestInput): BacktestPath {
       });
       weights = w;
       monthsSinceRebalance = 1;
-      rebalances.push({
+      const evt: RebalanceEvent = {
         date: decisionMonth,
         holdings: picks,
         turnover,
         txCostApplied: drag,
-      });
+      };
+      // Phase 14: only attach weights / sector mix when constraints are
+      // actually in effect — otherwise we'd bloat legacy result JSON with
+      // redundant equal-weight data.
+      if (hasConstraints) {
+        evt.weights = w;
+        evt.sectorAllocation = sectorAllocationFromWeights(w);
+        evt.constrained = wasConstrained;
+      }
+      rebalances.push(evt);
       // Apply the drag to next month's strategy return.
       // (recorded inline in the return computation below via `pendingDrag`)
     } else {
