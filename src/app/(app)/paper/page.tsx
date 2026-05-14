@@ -377,13 +377,22 @@ function PaperCard({
                 </div>
               </div>
             )}
-            <Link
-              href={`/studies/${portfolio.sourceStudyId}/result`}
-              className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1 mt-2"
-            >
-              查看源研究
-              <ArrowRight className="h-3 w-3" />
-            </Link>
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <Link
+                href={`/studies/${portfolio.sourceStudyId}/result`}
+                className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1"
+              >
+                查看源研究
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+              <Link
+                href={`/paper/${portfolio.id}/review`}
+                className="text-xs text-purple-600 hover:underline inline-flex items-center gap-1"
+              >
+                季度复盘
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
           </div>
         )}
       </CardContent>

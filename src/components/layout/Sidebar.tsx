@@ -12,6 +12,7 @@ import {
   Database,
   Info,
   LogOut,
+  Target,
 } from "lucide-react";
 
 const navItems = [
@@ -20,6 +21,13 @@ const navItems = [
   { href: "/studies/new", label: "新研究", icon: Plus, exact: true },
   { href: "/studies/compare", label: "对比", icon: GitCompare, exact: false },
   { href: "/paper", label: "Paper", icon: Briefcase, exact: false },
+  // Phase 15 — user-level "are my predictions playing out?" dashboard.
+  {
+    href: "/profile/calibration",
+    label: "校准",
+    icon: Target,
+    exact: false,
+  },
   { href: "/data-sources", label: "数据源", icon: Database, exact: false },
   { href: "/about", label: "关于", icon: Info, exact: false },
 ];
