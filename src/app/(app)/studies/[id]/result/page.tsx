@@ -21,6 +21,7 @@ import {
   generateResultMarkdown,
   downloadMarkdown,
 } from "@/lib/exportMarkdown";
+import { DebatePanel } from "@/components/DebatePanel";
 import {
   LineChart,
   Line,
@@ -232,6 +233,8 @@ const TABS = [
   { key: "performance", label: "表现" },
   { key: "holdings", label: "持仓" },
   { key: "analysis", label: "分析" },
+  // Phase 13: multi-agent investment debate.
+  { key: "debate", label: "投研讨论" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -1844,6 +1847,13 @@ export default function ResultPage() {
           <RobustnessCard data={result.robustness} />
           <ParameterSensitivityCard data={result.parameterSensitivity} />
         </div>
+      )}
+
+      {activeTab === "debate" && (
+        <DebatePanel
+          studyId={studyId}
+          hasCompletedResult={study.status === "COMPLETED" && !!result}
+        />
       )}
 
       <div className="pb-4" />

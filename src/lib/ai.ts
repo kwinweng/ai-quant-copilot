@@ -110,7 +110,7 @@ export function isBillableError(err: unknown): boolean {
 // Per-user per-day quota — cheap protection against runaway costs.
 // ============================================================
 
-export type UsageKind = "plan" | "conclusion" | "coach";
+export type UsageKind = "plan" | "conclusion" | "coach" | "debate" | "review";
 
 const DEFAULT_QUOTAS: Record<UsageKind, number> = {
   plan: 10,
@@ -118,6 +118,13 @@ const DEFAULT_QUOTAS: Record<UsageKind, number> = {
   // Coach turns: a single dialog can take 3-12 turns (per the design),
   // so allow ~4 sessions per day before throttling.
   coach: 60,
+  // Phase 13: multi-agent debate is expensive (4 LLM calls per run, ~6k
+  // output tokens). 5 generations/day per user covers exploring a few
+  // studies without inviting abuse.
+  debate: 5,
+  // Phase 15: per-portfolio quarterly review summaries. One AI call each
+  // with 7-day cache, so 10/day is generous.
+  review: 10,
 };
 
 function utcDateKey(d = new Date()): Date {
@@ -143,14 +150,24 @@ export async function assertUsageQuota(
   const limit = DEFAULT_QUOTAS[kind];
   const row = await prisma.aiUsageDay.findUnique({
     where: { userId_date: { userId, date } },
-    select: { planCalls: true, conclusionCalls: true, coachCalls: true },
+    select: {
+      planCalls: true,
+      conclusionCalls: true,
+      coachCalls: true,
+      debateCalls: true,
+      reviewCalls: true,
+    },
   });
   const used = row
     ? kind === "plan"
       ? row.planCalls
       : kind === "conclusion"
         ? row.conclusionCalls
-        : row.coachCalls
+        : kind === "coach"
+          ? row.coachCalls
+          : kind === "debate"
+            ? row.debateCalls
+            : row.reviewCalls
     : 0;
   if (used >= limit) {
     return { exceeded: true, used, limit, kind };
@@ -168,7 +185,11 @@ export async function incrementUsage(
       ? { planCalls: { increment: 1 } }
       : kind === "conclusion"
         ? { conclusionCalls: { increment: 1 } }
-        : { coachCalls: { increment: 1 } };
+        : kind === "coach"
+          ? { coachCalls: { increment: 1 } }
+          : kind === "debate"
+            ? { debateCalls: { increment: 1 } }
+            : { reviewCalls: { increment: 1 } };
   await prisma.aiUsageDay.upsert({
     where: { userId_date: { userId, date } },
     create: {
@@ -177,6 +198,8 @@ export async function incrementUsage(
       planCalls: kind === "plan" ? 1 : 0,
       conclusionCalls: kind === "conclusion" ? 1 : 0,
       coachCalls: kind === "coach" ? 1 : 0,
+      debateCalls: kind === "debate" ? 1 : 0,
+      reviewCalls: kind === "review" ? 1 : 0,
     },
     update: inc,
   });
