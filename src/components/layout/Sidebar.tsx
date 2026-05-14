@@ -146,16 +146,24 @@ export function MobileTopBar() {
   );
 }
 
-// Sprint #3: mobile bar is space-constrained; show 5 of 6 destinations.
-// We keep 关于 (it's the help / changelog reference users actually need)
-// and drop 数据源 instead — that page is a demo placeholder and doesn't
-// drive the daily workflow. 数据源 stays available on the desktop sidebar
-// and via the dashboard's data-source footer panel link.
+// Sprint #3: mobile bar is space-constrained; show 5 of N destinations.
+// We keep 关于 (help / changelog) and drop 数据源 (demo placeholder).
+//
+// Phase 12+15 follow-up: 对比 demoted in favor of Paper. Reasoning:
+//   * 对比 is a low-frequency power feature (needs ≥2 finished studies and
+//     a user actively choosing to compare). Still reachable from the
+//     desktop sidebar.
+//   * Paper is the daily check-in surface — monthly rebalance advice
+//     pushes through Telegram and the user needs a frictionless tap path
+//     into /paper to confirm or skip the advice.
+//   * 校准 (/profile/calibration) is intentionally NOT on the mobile bar;
+//     its natural path is "Paper card → 季度复盘 → user-level aggregation",
+//     which means most users meet it via the Paper funnel anyway.
 const MOBILE_NAV_HREFS = new Set([
   "/",
   "/studies/coach",
   "/studies/new",
-  "/studies/compare",
+  "/paper",
   "/about",
 ]);
 
