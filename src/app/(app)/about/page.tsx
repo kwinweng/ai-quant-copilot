@@ -31,9 +31,19 @@ import {
   Activity,
   Coins,
   Library,
+  // Phase 13/14/15 — features tab
+  Target,
+  Scale,
+  ShieldAlert,
+  Briefcase,
+  PieChart,
+  Bell,
+  Boxes,
+  Microscope,
+  Workflow,
 } from "lucide-react";
 
-type TabKey = "usage" | "learn" | "changelog";
+type TabKey = "usage" | "features" | "learn" | "changelog";
 
 interface ChangelogEntry {
   version: string;
@@ -48,6 +58,59 @@ interface ChangelogEntry {
 // Source of truth for the in-app changelog. Update this list whenever a new
 // phase ships — keep entries newest-first.
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "Phase 15 · 长期校准闭环",
+    date: "2026-05-14",
+    title: "Paper 组合季度复盘 + 用户级校准仪表盘",
+    summary:
+      "回测好看不一定真赚钱。Phase 15 把「真实持有期表现 vs 回测预期」做成校准报告：每个 Paper 组合一份季度复盘（hit rate / 跟踪误差 / 实际 vs 预期 CAGR / 调仓执行率 + AI 一句话总结），全用户级别再做一个仪表盘把所有 Paper 组合的预测 vs 实际散点图绘出来，对角线 = 完美预测。失败策略持续低于 bootstrap CI 下沿会自动 banner 建议归档。",
+    highlights: [
+      "新表字段 PaperPortfolio.quarterlyReview Json + AiUsageDay.reviewCalls，7 天缓存",
+      "src/lib/paper/calibration.ts：hit rate（同符号月份比例）/ 年化跟踪误差 / 重叠区间 CAGR / 执行率（confirmed/(confirmed+skipped)）",
+      "GET/POST /api/paper/[id]/review：7 天 TTL 缓存，POST 触发重算 + AI 摘要",
+      "src/lib/ai/reviewSummary.ts：DeepSeek 一句话总结，超时降级到启发式 fallback",
+      "/paper/[id]/review 详情页：指标卡 + AI 总结 + 调仓执行明细 + 失败策略归档建议 banner",
+      "/profile/calibration 用户级仪表盘：聚合中位 hit rate / 跟踪误差 / CAGR 偏差 + 预测 vs 实际散点图（recharts）+ 逐组合表",
+      "侧边栏新增「校准」入口（Target 图标），Paper 卡片加「季度复盘 →」链接",
+      "+12 个 vitest 测试覆盖 calibration 数学边界 + isReviewStale 时效门",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
+    version: "Phase 14 · 风险约束 + 组合优化",
+    date: "2026-05-14",
+    title: "单仓上限 + 行业上限：让 Paper 组合像真钱",
+    summary:
+      "等权篮子能跑回测但不像真实资金经理建的组合：5 只能源股一起涨可能只是因为油价。Phase 14 加可选风险约束——单仓上限（默认 20%）+ 行业上限（默认 35% per GICS 板块）+ 截尾归一化。老研究 constraints={} 走原始等权路径不变，回测结果 bit-for-bit 一致。Paper 组合从源研究继承约束。min_var 优化器作为应急砍后置到下一个 minor。",
+    highlights: [
+      "Schema：Study.constraints Json default '{}' + StudyResult.sectorAllocation Json?",
+      "src/lib/portfolio/sectorMap.ts：60 ticker → GICS 板块（Tech/Financials/Healthcare/...）静态映射，sectorMap.test.ts 校验覆盖完整",
+      "src/lib/portfolio/constraints.ts：单仓 cap → 行业 cap → 归一化迭代算法，相互不可行时降级到 sum=1 保底",
+      "Engine 集成：hasConstraints 路径下走 applyConstraints + 记录每次 rebalance 的 weights / sectorAllocation",
+      "新研究表单「高级选项」加「启用风险约束」勾选 + 两个数字输入；默认关闭",
+      "结果页「持仓」tab 新 SectorAllocationCard：水平堆叠柱状图 + 8 色板块 legend",
+      "POST /api/paper 继承源 study 的 constrained weights（来自 lastRebalance.weights）",
+      "+17 个 vitest 测试：cap 数学、不可行降级、边界情况",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
+  {
+    version: "Phase 13 · 多智能体投研团（Regan / Jayzee / Quinn）",
+    date: "2026-05-14",
+    title: "单一 AI 结论升级成三方辩论制",
+    summary:
+      "原来的「AI 结论」只是一段总结，看起来像话术。Phase 13 把它替换成「多头分析师 Regan / 风险官 Jayzee / 量化主管 Quinn」三方辩论：4 轮顺序流式输出，Regan 找最强论据，Jayzee 强制找致命风险（禁止附和），Regan 给缓解措施，Quinn 概率加权出最终判断 + 投资建议。每个论据必须用 [ref: metrics.cagr] 这种 token 引用真实数据，post-process 校验引用率防止幻觉。",
+    highlights: [
+      "Schema：StudyResult.aiDebate Json? + AiUsageDay.debateCalls 配额（5 次/天/用户）",
+      "src/lib/ai/debateContext.ts：把 30k+ tokens 的 StudyResult 压成 < 6KB 的可引用 reference 表",
+      "src/lib/ai/debate.ts：三个 agent system prompt + 顺序协调器 yield DebateEvent",
+      "POST /api/studies/[id]/debate：SSE 流式 4 轮辩论；GET 返回缓存；DELETE 清缓存允许重新生成；force=1 跳过缓存",
+      "src/components/DebatePanel.tsx：三色 timeline UI（Regan 蓝 / Quinn 紫 / Jayzee 红）+ 数据引用 pill + 实时打字效果",
+      "结果页第 5 个 tab「投研讨论」",
+      "+12 个 vitest 测试：debateContext 摘要 + citation 校验",
+    ],
+    badge: { label: "重要", tone: "feature" },
+  },
   {
     version: "Phase 11.5 · 量化入门 4 个进阶章节",
     date: "2026-05-12",
@@ -511,6 +574,12 @@ export default function AboutPage() {
           label="使用说明"
         />
         <TabButton
+          active={tab === "features"}
+          onClick={() => setTab("features")}
+          icon={<Boxes className="h-4 w-4" />}
+          label="功能介绍"
+        />
+        <TabButton
           active={tab === "learn"}
           onClick={() => setTab("learn")}
           icon={<GraduationCap className="h-4 w-4" />}
@@ -525,6 +594,7 @@ export default function AboutPage() {
       </div>
 
       {tab === "usage" && <UsageGuide />}
+      {tab === "features" && <FeatureGuide />}
       {tab === "learn" && <LearnGuide />}
       {tab === "changelog" && <Changelog />}
     </div>
@@ -573,17 +643,21 @@ function UsageGuide() {
         icon={<Sparkles className="h-4 w-4 text-blue-600" />}
       >
         <p className="text-sm text-gray-700 leading-relaxed">
-          AI Quant Copilot 是一个面向个人研究者的美股量化研究平台。它把「投资假设 → 研究计划 → 真实回测 → 报告解读」串成一条可重复的工作流，并把回测结果做成可对比、可复制、可导出的研究资产。
+          AI Quant Copilot 是一个面向个人研究者的美股量化研究平台。它把「投资假设 → 研究计划 → 真实回测 → 多 agent 投研讨论 → Paper 组合长期跟踪 → 校准复盘」串成一条可重复、可校准的工作流。
         </p>
         <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
           <FeatureChip>真实回测（Yahoo Finance 价格）</FeatureChip>
           <FeatureChip>AI 假设教练（3-12 轮对话）</FeatureChip>
-          <FeatureChip>AI 计划与解读（DeepSeek）</FeatureChip>
-          <FeatureChip>混合 PIT 多因子（Yahoo + SEC）</FeatureChip>
-          <FeatureChip>实验管理（标签 / 收藏 / 归档）</FeatureChip>
-          <FeatureChip>研究对比（指标 + 曲线叠加）</FeatureChip>
-          <FeatureChip>Markdown 导出</FeatureChip>
-          <FeatureChip>iOS 主屏 App（添加到主屏幕）</FeatureChip>
+          <FeatureChip>多 agent 投研团（Regan / Jayzee / Quinn）</FeatureChip>
+          <FeatureChip>全 PIT 多因子（Yahoo + SEC EDGAR）</FeatureChip>
+          <FeatureChip>风险约束（单仓 + 行业上限）</FeatureChip>
+          <FeatureChip>稳健性（OOS + Bootstrap CI）</FeatureChip>
+          <FeatureChip>多基准 OLS 归因</FeatureChip>
+          <FeatureChip>分层交易成本</FeatureChip>
+          <FeatureChip>Paper 组合 + 月度调仓 Telegram</FeatureChip>
+          <FeatureChip>季度复盘 + 校准仪表盘</FeatureChip>
+          <FeatureChip>实验管理（标签 / 收藏 / 归档 / 对比）</FeatureChip>
+          <FeatureChip>iOS 主屏 App + Markdown 导出</FeatureChip>
         </div>
         <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -595,7 +669,7 @@ function UsageGuide() {
       </Section>
 
       <Section
-        title="一次完整研究的 5 步"
+        title="一次完整研究的 7 步"
         icon={<ArrowRight className="h-4 w-4 text-blue-600" />}
       >
         <ol className="space-y-3">
@@ -604,7 +678,7 @@ function UsageGuide() {
             title="新建研究"
             body={
               <>
-                进入「新研究」，写一句投资假设（例如「价值 + 质量因子组合在大市值美股上长期跑赢 SPY」），选股票池、回测区间、再平衡频率、基准、交易成本，以及「因子组合」（动量单因子 vs Value+Quality+Momentum 多因子）。
+                进入「新研究」，写一句投资假设（例如「价值 + 质量因子组合在大市值美股上长期跑赢 SPY」），选股票池、回测区间、再平衡频率、基准、交易成本、因子组合（动量单因子 vs V+Q+M 多因子）。高级选项里可启用<span className="text-blue-700 font-medium">「风险约束」</span>设单仓上限（默认 20%）+ 行业上限（默认 35% per GICS 板块），让回测更接近真实资金经理的组合。
                 <span className="block mt-1.5 text-blue-700">
                   写不出假设？走「AI 教练」入口——3-12 轮对话帮你把模糊想法整理成完整可回测的假设，或直接从 28 条分级例子里挑一条预填表单。
                 </span>
@@ -620,17 +694,41 @@ function UsageGuide() {
           <Step
             n={3}
             title="跑回测（实时进度）"
-            body="9 步流程（多因子模式 10 步）：拉价、拉基准、（拉基本面）、算因子、构组合、跑引擎、算指标、敏感性扫描、入库。可随时取消。"
+            body="9 步流程（多因子模式 10 步）：拉价、拉基准、（拉基本面）、算因子、构组合（应用约束）、跑引擎、算指标、敏感性扫描、入库。可随时取消。"
           />
           <Step
             n={4}
             title="读报告"
-            body="结果页四个 tab——概览（AI 结论 + 数据质量 + 唯一指标表 + 月度极值）、表现（权益曲线 + 回撤 + 年度收益图与表）、持仓（最末次再平衡的多因子分解 + 历史调仓记录）、分析（因子 IC 诊断 + 基本面字段覆盖率 + 参数敏感性扫描）。"
+            body="结果页 5 个 tab——概览（AI 结论 + 数据质量 + 指标表 + 月度极值）、表现（权益 + 回撤 + 年度收益）、持仓（多因子分解 + 行业分布 + 调仓历史）、分析（因子 IC + 稳健性 OOS/Bootstrap + 多基准归因 + 参数敏感性）、投研讨论（多 agent 三方辩论）。"
           />
           <Step
             n={5}
-            title="衍生：复制 / 对比 / 导出"
-            body="一个研究做完后可以「复制并修改」生成变体，或在「对比」页选两个已完成的研究做并排比较，或一键导出 Markdown 报告。"
+            title="多 agent 投研讨论"
+            body={
+              <>
+                结果页第 5 个 tab 点「生成辩论」，看 <span className="font-medium">Regan（多头）→ Jayzee（风险官）→ Regan（回应）→ Quinn（仲裁）</span> 4 轮 SSE 流式辩论。Quinn 最后给概率加权的多头胜率 0-100% + 投资建议 + 下一步动作。每条论据强制引用真实数据 token（如 [ref: bootstrap.sharpe]）防止 AI 话术。
+              </>
+            }
+          />
+          <Step
+            n={6}
+            title="转 Paper 组合 + 月度跟踪"
+            body={
+              <>
+                觉得研究值得跟踪？「转 Paper 组合」按钮把最末次再平衡持仓 + 约束权重做成 buy-and-hold 模拟组合。系统每月初自动重算策略 → 生成「调仓建议」（加什么卖什么 diff）→ 推送 Telegram → 你点「确认调仓」或「跳过」。**仅建议不自动改**。
+              </>
+            }
+            link={{ href: "/paper", label: "Paper" }}
+          />
+          <Step
+            n={7}
+            title="季度复盘 + 校准检查"
+            body={
+              <>
+                Paper 卡片点「季度复盘 →」看实际持有期 vs 回测预期：hit rate（月度方向一致率）、年化跟踪误差、实际 vs 预期 CAGR、调仓执行率，附 AI 一句话总结。所有 Paper 组合的校准也聚合到「校准」侧边栏入口的<span className="font-medium">用户级仪表盘</span>，散点图直接看「我的研究到底准不准」。
+              </>
+            }
+            link={{ href: "/profile/calibration", label: "校准仪表盘" }}
           />
         </ol>
       </Section>
@@ -674,7 +772,7 @@ function UsageGuide() {
       </Section>
 
       <Section
-        title="结果页的 4 个 tab"
+        title="结果页的 5 个 tab"
         icon={<TrendingUp className="h-4 w-4 text-blue-600" />}
       >
         <div className="space-y-2 text-sm">
@@ -688,11 +786,15 @@ function UsageGuide() {
           />
           <TabRow
             label="持仓"
-            body="多因子模式下的最末次再平衡持仓 V/Q/M z-score 分解（按色阶高亮强弱）→ 完整再平衡历史（每次调仓的持仓清单 + 单边换手 + 交易成本影响）。"
+            body="启用风险约束时的行业分布堆叠柱状图（最新调仓）→ 多因子模式下最末次再平衡持仓 V/Q/M z-score 分解（按色阶高亮强弱）→ 完整再平衡历史（每次调仓的持仓清单 + 单边换手 + 交易成本影响）。"
           />
           <TabRow
             label="分析"
-            body="因子 IC 诊断 → 基本面字段覆盖率（多因子模式下显示每个 Value/Quality 字段在股票池中的可用率）→ 参数敏感性扫描（6/9/12 动量回看期、月/季再平衡、Top 10/20/30% 桶宽度）。"
+            body="因子 IC 诊断 → 基本面字段覆盖率（多因子模式下显示每个 Value/Quality 字段在股票池中的可用率）→ 多基准 OLS 归因（α/β/R² vs SPY/QQQ/IWM/MTUM/IUSV）→ 稳健性报告（70/30 OOS 拆分、Bootstrap 95% CI、前后段对比）→ 参数敏感性扫描（6/9/12 动量回看期、月/季再平衡、Top 10/20/30% 桶宽度）。"
+          />
+          <TabRow
+            label="投研讨论"
+            body="点「生成辩论」让 Regan / Jayzee / Quinn 三个 AI agent 围绕回测数据做 4 轮 SSE 流式辩论。每条论据必须引用真实数据 token，Quinn 最后给概率加权结论 + 下一步建议。5 次/天配额，结果缓存可重新生成。"
           />
         </div>
       </Section>
@@ -775,7 +877,40 @@ function UsageGuide() {
           <li>
             <span className="font-medium">添加到 iOS 主屏</span>：Safari 打开主域 → 分享按钮 → 「添加到主屏幕」，开启「作为网页 App 打开」即可全屏运行。建议手机端常用——回测进度推送看起来更像原生 App。
           </li>
+          <li>
+            <span className="font-medium">配置 Telegram 接收调仓提醒</span>{" "}
+            <Activity className="inline h-3 w-3 align-text-bottom" />
+            ：服务端 .env 配 TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID，每月 1 号会自动收到所有 Paper 组合的调仓建议。未配置时调度器照常跑、只是不推送。
+          </li>
+          <li>
+            <span className="font-medium">定期看「校准」仪表盘</span>{" "}
+            <ScanLine className="inline h-3 w-3 align-text-bottom" />
+            ：每跑一份 Paper 组合就在侧边栏的「校准」入口产生一个新数据点。3 个月后散点图就能看出「我的研究 hit rate 中位数」「实际 CAGR vs 预期 CAGR 偏差」——这是判断策略真假的最直接证据。
+          </li>
         </ul>
+      </Section>
+
+      <Section
+        title="Paper 组合 + 月度跟踪闭环"
+        icon={<Briefcase className="h-4 w-4 text-blue-600" />}
+      >
+        <div className="space-y-2.5 text-sm text-gray-700">
+          <div>
+            <span className="font-medium">每月 1 号系统自动跑</span>：调度器（Linux cron + `/api/cron/paper-advice`）遍历所有未归档 Paper 组合，重新跑源研究策略到最新已收盘的月份，把「策略推荐持仓 vs 当前持仓」做成「待处理」建议写到 DB + 推 Telegram。
+          </div>
+          <div>
+            <span className="font-medium">人工确认才会动持仓</span>：每条建议有「确认调仓」「跳过本次」两个按钮。**仅建议、不自动改持仓**——避免脚本 bug 默默把组合弄乱。
+          </div>
+          <div>
+            <span className="font-medium">季度复盘自动算</span>：Paper 卡片点「季度复盘 →」即时计算 hit rate / 跟踪误差 / 实际 vs 预期 CAGR / 调仓执行率，附 DeepSeek 一句话总结。结果缓存 7 天；超过 7 天点「重新计算」拉新数据。AI 总结失败时降级到启发式 fallback 不阻塞。
+          </div>
+          <div>
+            <span className="font-medium">失败策略自动提示归档</span>：实际 CAGR 比预期低 10pp+ 且观察月数 ≥ 3 时会显示红色 banner 建议归档，防止用户死扛幻觉策略。
+          </div>
+          <div>
+            <span className="font-medium">用户级仪表盘聚合所有组合</span>：侧边栏「校准」入口（`/profile/calibration`），中位指标 + 预测 vs 实际散点图（对角线 = 完美预测）+ 逐组合表。用一张图回答「我的研究到底准不准」。
+          </div>
+        </div>
       </Section>
 
       <Section
@@ -927,6 +1062,404 @@ function Tech({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-center bg-gray-50 border border-gray-100 rounded px-2 py-1.5 text-gray-700">
       {children}
+    </div>
+  );
+}
+
+// =====================================================================
+// Features — comprehensive product capability catalog organized by user
+// workflow stage. Distinct from UsageGuide (which is "how to use") and
+// LearnGuide (which is "quant concepts"). New features added each phase
+// should be appended in the appropriate group here.
+// =====================================================================
+
+interface FeatureItem {
+  title: string;
+  summary: string;
+  details?: string[];
+  phase: string;
+  link?: { href: string; label: string };
+  highlight?: boolean;
+}
+
+interface FeatureGroup {
+  title: string;
+  icon: React.ReactNode;
+  description: string;
+  items: FeatureItem[];
+}
+
+const FEATURE_GROUPS: FeatureGroup[] = [
+  {
+    title: "AI 驱动的研究工作流",
+    icon: <Workflow className="h-4 w-4 text-blue-600" />,
+    description: "从一句假设到可信结论的完整链路，AI 是产品骨架而非装饰",
+    items: [
+      {
+        title: "AI 假设教练",
+        phase: "Phase 4.3 / Sprint #3",
+        summary:
+          "3-12 轮 SSE 流式对话把模糊投资想法整理成完整可回测假设，对话结束时输出 [FINAL] + JSON 自动预填新研究表单",
+        details: [
+          "每轮一个聚焦问题，AI 自适应轮数（用户清晰 3-5 轮，新手 6-12 轮）",
+          "28 条分级例子库（初/中/高/敏感性）作为 few-shot 上下文",
+          "60 轮/天/用户配额",
+        ],
+        link: { href: "/studies/coach", label: "试一下" },
+      },
+      {
+        title: "AI 研究计划生成",
+        phase: "Phase 2.2",
+        summary:
+          "DeepSeek 接到假设后生成结构化研究计划：数据要求 / 因子定义 / 回测规则 / 风险检查 / 已知限制",
+        details: [
+          "5 个 H2 章节固定结构，markdown 化解析",
+          "10 次/天/用户配额，错误信息脱敏（密钥不出错误页）",
+        ],
+      },
+      {
+        title: "多智能体投研团",
+        phase: "Phase 13",
+        summary:
+          "回测完成后让 Regan（多头）/ Jayzee（风险官）/ Quinn（量化主管）三个 agent 围绕数据展开 4 轮 SSE 辩论，最后 Quinn 给概率加权的多头胜率 + 投资建议",
+        details: [
+          "每条论据强制引用真实数据 token（如 [ref: bootstrap.sharpe]），post-process 校验防幻觉",
+          "Jayzee 系统提示强制找 ≥2 个致命风险，禁止附和 Regan",
+          "5 次/天/用户配额；结果缓存 + 一键重新生成",
+        ],
+        highlight: true,
+      },
+      {
+        title: "AI 结论解读",
+        phase: "Phase 2.2",
+        summary:
+          "结果页打开时按需生成简体中文结论 + 4-6 条要点，引用具体数字而非空话",
+        details: ["20 次/天/用户配额", "返回严格 JSON 模式，前端结构化渲染"],
+      },
+      {
+        title: "AI 季度复盘总结",
+        phase: "Phase 15",
+        summary:
+          "Paper 组合季度复盘自动生成 50-120 字中文总结，引用 hit rate / 跟踪误差 / CAGR 偏差，末尾给一条具体可操作建议",
+        details: [
+          "10 次/天/用户配额，缓存 7 天",
+          "AI 失败时降级到启发式 fallback 不阻塞页面",
+        ],
+      },
+    ],
+  },
+  {
+    title: "回测引擎 + 因子模型",
+    icon: <Calculator className="h-4 w-4 text-blue-600" />,
+    description: "真实数据、真实因子、真实交易成本——回测可信度优先",
+    items: [
+      {
+        title: "60 ticker 美股大市值股票池",
+        phase: "Phase 6",
+        summary:
+          "8 大 GICS 板块覆盖 60 只美股大市值（Tech 10 / Financials 8 / Healthcare 7 / ...），UniverseProvider 抽象层为未来多市场预留接口",
+        details: [
+          "包含 8 只 fading large-cap（INTC/IBM/GE/F/X/KSS/GM/EBAY）降低纯赢家分布偏差",
+          "已坦诚披露：仍存幸存者偏差，Phase 6.5 计划接入历史指数成分股",
+        ],
+      },
+      {
+        title: "Value + Quality + Momentum 多因子",
+        phase: "Phase 4 / 5",
+        summary:
+          "Value（PE/PB/PS/EV-EBITDA）+ Quality（ROE/ROIC/毛利率/负债权益）+ 12-1 Momentum 等权 z-score 合成",
+        details: [
+          "Value PE/PB/PS 全 PIT：MarketCap_M = MarketCap_today × (adjclose_M / adjclose_today) ÷ SEC 绝对值",
+          "Quality 90 天 reporting lag PIT-correct（每月 M 只用 reportedAt < M-90d 的 filing）",
+          "EV/EBITDA 仍是 Yahoo 当前快照兜底",
+        ],
+      },
+      {
+        title: "全 PIT 数据层",
+        phase: "Phase 4.2 / 5",
+        summary:
+          "Yahoo Finance（价格 + 当前快照）+ SEC EDGAR XBRL（全历史 10-K filings）混合，FundamentalSnapshot 表 24 小时 TTL 全用户共享缓存",
+        details: [
+          "30 个 ticker 首次约 30-60 秒，之后 24h 内复用",
+          "Phase 5 起 ROIC 自算 NetIncome/(Equity+TotalDebt) 简化代理",
+        ],
+      },
+      {
+        title: "分层交易成本模型",
+        phase: "Phase 7",
+        summary:
+          "新研究默认走「分层」模型：mega-cap 1 bps / large-cap 4 bps / mid-cap 10 bps 基础点差 + sqrt(turnover) × 5 bps 市场冲击 + 用户填的佣金",
+        details: [
+          "比单一 bps 更接近实盘，老研究保留 simple 模型不被破坏",
+          "「成本」字段对所有回测结果生效，rebalanceHistory 显示每次调仓的实际 drag",
+        ],
+      },
+      {
+        title: "风险约束 + 组合优化",
+        phase: "Phase 14",
+        summary:
+          "新研究高级选项启用后，每次 rebalance 应用单仓上限（默认 20%）+ 行业上限（默认 35% per GICS 板块），截尾归一化",
+        details: [
+          "持仓 tab 新「行业分布」堆叠柱状图 + 8 色板块 legend",
+          "Paper 组合自动继承源研究约束权重（不强制等权）",
+          "min_var / Black-Litterman / 波动率目标暂未实现（应急砍延后）",
+        ],
+        highlight: true,
+      },
+      {
+        title: "参数敏感性扫描",
+        phase: "Phase 3.1",
+        summary:
+          "回测完成后自动扫描动量回看期（6/9/12 月）× 再平衡频率（月/季）× 分位桶宽度（10/20/30%），输出每个变体的 CAGR/Sharpe/MaxDD/Alpha",
+        details: [
+          "策略对单参数极敏感 → 警惕过拟合",
+          "纯函数实现，单次回测增加 ~15s 计算",
+        ],
+      },
+    ],
+  },
+  {
+    title: "稳健性 + 归因",
+    icon: <Microscope className="h-4 w-4 text-blue-600" />,
+    description: "Alpha 是真 alpha 还是 beta 别名？数据告诉你",
+    items: [
+      {
+        title: "70/30 样本内外拆分",
+        phase: "Phase 8",
+        summary:
+          "前 70% 做样本内，后 30% 做样本外，分别算 CAGR/Sharpe/MaxDD。OOS 衰减大 = 过拟合嫌疑大",
+        details: [
+          "纯函数 splitInSampleOutOfSample(returns, 0.7)",
+          "结果页 RobustnessCard 第 1 张子表",
+        ],
+      },
+      {
+        title: "Bootstrap 95% 置信区间",
+        phase: "Phase 8",
+        summary:
+          "IID 重抽样 1000 次（确定性种子），输出 Sharpe / CAGR / MaxDD 的 mean / median / 95% CI",
+        details: [
+          "Sharpe CI 下沿 ≤ 0 = 无法显著区分零",
+          "确定性种子保证每次重跑同一份研究 CI 不变",
+        ],
+      },
+      {
+        title: "子区间对比",
+        phase: "Phase 8",
+        summary:
+          "前 50% vs 后 50% 区间分别算指标，看策略对宏观制度变化（QE 前后、加息周期等）的敏感性",
+      },
+      {
+        title: "多基准 OLS 归因",
+        phase: "Phase 9",
+        summary:
+          "对 SPY / QQQ / IWM / MTUM / IUSV 各跑一次单变量 OLS 回归，输出每个基准的 α（年化）/ β / R² / correlation",
+        details: [
+          "MTUM R² = 0.85 → 所谓 alpha 是动量因子敞口的别名而非真 alpha",
+          "Runner 自动拉缺失的 4 只 ETF 月度价",
+        ],
+      },
+      {
+        title: "数据质量披露面板",
+        phase: "Phase 3.1",
+        summary:
+          "概览 tab 顶部固定显示幸存者偏差状态、因子类型说明、PIT 实现细节、成本模型说明、免责声明——不让用户漏掉前提",
+      },
+    ],
+  },
+  {
+    title: "Paper 组合 + 月度跟踪",
+    icon: <Briefcase className="h-4 w-4 text-blue-600" />,
+    description: "把研究真正用起来——从一次性回测到持续跟踪闭环",
+    items: [
+      {
+        title: "一键转 Paper 组合",
+        phase: "Phase 10",
+        summary:
+          "已完成研究的最末次再平衡持仓 + 约束权重 + 初始 $100k → 模拟组合。开仓后 Yahoo 月度价持续追踪，对比基准实时显示跑赢/落后",
+      },
+      {
+        title: "月度调仓建议 + Telegram 推送",
+        phase: "Phase 12",
+        summary:
+          "每月 1 号系统重新跑源研究，把「策略推荐持仓 vs 当前」做成 diff 写「待处理」建议 + 推 Telegram，仅建议不自动改",
+        details: [
+          "PaperRebalanceAdvice 表，每月每组合 1 行，addedTickers / removedTickers diff",
+          "/api/cron/paper-advice 受 CRON_SECRET 保护",
+          "Linux cron 触发，TELEGRAM_BOT_TOKEN 未配置时静默 no-op",
+        ],
+        highlight: true,
+      },
+      {
+        title: "确认 / 跳过 调仓",
+        phase: "Phase 12",
+        summary:
+          "Paper 卡片显示「待处理」红点 → 展开 diff → 点「确认调仓」自动更新持仓，或「跳过本次」记录但不改持仓",
+        details: [
+          "原子 transaction 避免竞态",
+          "advice 状态 pending → confirmed / skipped，actedAt 记录人工干预时间",
+        ],
+      },
+      {
+        title: "季度复盘报告",
+        phase: "Phase 15",
+        summary:
+          "每个 Paper 组合一份按需计算的复盘：hit rate（月度方向一致率）/ 年化跟踪误差 / 重叠区间实际 vs 预期 CAGR / 调仓执行率 + AI 一句话总结",
+        details: [
+          "7 天缓存，超期点「重新计算」拉新数据",
+          "实际持续低于回测预期 10pp+ 且 ≥3 月 → 红 banner 建议归档",
+        ],
+        highlight: true,
+        link: { href: "/paper", label: "我的组合" },
+      },
+      {
+        title: "用户级校准仪表盘",
+        phase: "Phase 15",
+        summary:
+          "聚合所有活跃 Paper 组合的校准数据，中位 hit rate / 跟踪误差 / CAGR 偏差 + 预测 vs 实际散点图（对角线 = 完美预测）",
+        details: ["回答的问题：「我的研究到底准不准」"],
+        highlight: true,
+        link: { href: "/profile/calibration", label: "查看仪表盘" },
+      },
+    ],
+  },
+  {
+    title: "实验管理 + 工作流体验",
+    icon: <Layers className="h-4 w-4 text-blue-600" />,
+    description: "把研究从单次跑变成可对比、可复用、可分享的资产",
+    items: [
+      {
+        title: "标签 / 收藏 / 归档",
+        phase: "Phase 3.2",
+        summary:
+          "每个研究可加自定义标签（如「2026-q2-momentum」）+ 星标收藏 + 软删除归档；仪表盘视图：全部 / 收藏 / 仅归档 / 含归档",
+      },
+      {
+        title: "实时搜索 + 多维筛选 + 排序",
+        phase: "Phase 3.2",
+        summary:
+          "搜索标题 + 假设；筛选状态 / 因子类型 / 标签；按创建时间 / CAGR / Sharpe / MaxDD 排序",
+      },
+      {
+        title: "复制并修改",
+        phase: "Phase 3.1",
+        summary:
+          "结果页一键「复制并修改」，预填表单到 /studies/new?cloneFrom=<id>，方便做参数变体比较",
+      },
+      {
+        title: "双研究并排对比",
+        phase: "Phase 3.2",
+        summary:
+          "/studies/compare?a=ID&b=ID 选两个已完成研究做并排：指标差异 + 参数差异 + 权益叠加 + 回撤叠加",
+        link: { href: "/studies/compare", label: "对比页" },
+      },
+      {
+        title: "Markdown 报告导出",
+        phase: "Phase 3.1",
+        summary:
+          "一键导出研究完整 Markdown：假设 / 计划 / 指标表 / 因子诊断 / 数据质量披露，可粘贴到 Obsidian / Notion 等笔记系统",
+      },
+      {
+        title: "PWA + iOS 主屏 App",
+        phase: "Sprint #5",
+        summary:
+          "manifest + icon 已配齐，Safari 「添加到主屏幕」开启「作为网页 App 打开」全屏运行；apple-icon / manifest.webmanifest 不走 auth middleware",
+      },
+    ],
+  },
+];
+
+function FeatureGuide() {
+  return (
+    <div className="space-y-6">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+        <div className="font-medium mb-1.5 inline-flex items-center gap-1.5">
+          <Boxes className="h-4 w-4" />
+          产品能力全景
+        </div>
+        <p className="leading-relaxed">
+          按用户研究工作流的 5 个阶段组织。带{" "}
+          <span className="inline-flex items-center gap-0.5 align-text-bottom">
+            <Sparkles className="h-3 w-3 text-amber-500" />
+            <span className="font-medium text-amber-700">高亮</span>
+          </span>{" "}
+          的是最新交付（Phase 13/14/15）。<span className="text-blue-700">「使用说明」</span> tab 偏「怎么用」，这一页偏「能用什么」。
+        </p>
+      </div>
+
+      {FEATURE_GROUPS.map((group) => (
+        <FeatureGroupCard key={group.title} group={group} />
+      ))}
+
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600">
+        <span className="font-medium text-gray-700">如何阅读：</span>
+        每个能力卡片标了实现版本（Phase）和触发场景。带{" "}
+        <Sparkles className="inline h-3 w-3 text-amber-500 align-text-bottom" />{" "}
+        的是 H2 2026 战略主线（多 agent 投研、风险约束、校准闭环）。其他能力按 Phase 时间线积累；详细变更看「更新记录」tab。
+      </div>
+    </div>
+  );
+}
+
+function FeatureGroupCard({ group }: { group: FeatureGroup }) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/40">
+        <h3 className="text-sm font-semibold text-gray-900 inline-flex items-center gap-2">
+          {group.icon}
+          {group.title}
+        </h3>
+        <p className="text-xs text-gray-500 mt-0.5">{group.description}</p>
+      </div>
+      <div className="divide-y divide-gray-100">
+        {group.items.map((item) => (
+          <FeatureRow key={item.title} item={item} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FeatureRow({ item }: { item: FeatureItem }) {
+  return (
+    <div
+      className={`px-4 py-3 ${
+        item.highlight ? "bg-amber-50/40" : ""
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          {item.highlight && (
+            <Sparkles className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+          )}
+          <h4 className="text-sm font-semibold text-gray-900">{item.title}</h4>
+          <Badge variant="muted" className="text-[10px] shrink-0">
+            {item.phase}
+          </Badge>
+        </div>
+        {item.link && (
+          <Link href={item.link.href}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-blue-600 hover:bg-blue-50 gap-1"
+            >
+              {item.link.label}
+              <ArrowRight className="h-3 w-3" />
+            </Button>
+          </Link>
+        )}
+      </div>
+      <p className="text-sm text-gray-700 leading-relaxed mt-1.5">
+        {item.summary}
+      </p>
+      {item.details && item.details.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-xs text-gray-500 list-disc pl-5 leading-relaxed">
+          {item.details.map((d, i) => (
+            <li key={i}>{d}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
