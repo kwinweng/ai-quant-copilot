@@ -22,6 +22,8 @@ import {
   downloadMarkdown,
 } from "@/lib/exportMarkdown";
 import { DebatePanel } from "@/components/DebatePanel";
+import { ShareStudyButton } from "@/components/share/ShareStudyButton";
+import { LightweightLine } from "@/components/charts/LightweightLine";
 import {
   LineChart,
   Line,
@@ -415,6 +417,9 @@ function useIsNarrow(breakpointPx = 640): boolean {
   return narrow;
 }
 
+// Phase 16: equity + drawdown migrated to Lightweight Charts via the shared
+// LightweightLine wrapper. AnnualReturnsChart (bar) below stays Recharts
+// because bars are not Lightweight Charts' strong suit.
 function EquityChart({
   data,
   height = 240,
@@ -422,51 +427,7 @@ function EquityChart({
   data: ApiResult["equityCurve"];
   height?: number;
 }) {
-  const narrow = useIsNarrow();
-  // On narrow screens we keep every data point — the previous "every other"
-  // sampling made it look choppy. Subsampling is only useful on desktop
-  // where there's enough x-axis room for high-density lines anyway.
-  const sample = narrow ? data : data.filter((_, i) => i % 2 === 0);
-  const tickInterval = narrow ? 7 : 3;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={sample} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
-        <XAxis
-          dataKey="date"
-          tick={chartTickStyle}
-          tickLine={false}
-          interval={tickInterval}
-          axisLine={{ stroke: chartGrid }}
-        />
-        <YAxis
-          tick={chartTickStyle}
-          tickLine={false}
-          axisLine={false}
-          width={narrow ? 38 : 50}
-        />
-        <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
-        <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Line
-          type="monotone"
-          dataKey="strategy"
-          stroke={STRATEGY_COLOR}
-          strokeWidth={narrow ? 2.5 : 2}
-          dot={false}
-          name="策略"
-        />
-        <Line
-          type="monotone"
-          dataKey="spy"
-          stroke={SPY_COLOR}
-          strokeWidth={narrow ? 2 : 1.5}
-          dot={false}
-          name="基准"
-          strokeDasharray={narrow ? "6 3" : "4 2"}
-        />
-      </LineChart>
-    </ResponsiveContainer>
-  );
+  return <LightweightLine data={data} height={height} valueFormat="raw" />;
 }
 
 function DrawdownChart({
@@ -476,49 +437,7 @@ function DrawdownChart({
   data: ApiResult["drawdown"];
   height?: number;
 }) {
-  const narrow = useIsNarrow();
-  const sample = narrow ? data : data.filter((_, i) => i % 2 === 0);
-  const tickInterval = narrow ? 7 : 3;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={sample} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
-        <XAxis
-          dataKey="date"
-          tick={chartTickStyle}
-          tickLine={false}
-          interval={tickInterval}
-          axisLine={{ stroke: chartGrid }}
-        />
-        <YAxis
-          tick={chartTickStyle}
-          tickLine={false}
-          axisLine={false}
-          width={narrow ? 38 : 50}
-        />
-        <ReferenceLine y={0} stroke="#d1d5db" />
-        <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
-        <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Line
-          type="monotone"
-          dataKey="strategy"
-          stroke={STRATEGY_COLOR}
-          strokeWidth={narrow ? 2.5 : 2}
-          dot={false}
-          name="策略"
-        />
-        <Line
-          type="monotone"
-          dataKey="spy"
-          stroke={SPY_COLOR}
-          strokeWidth={narrow ? 2 : 1.5}
-          dot={false}
-          name="基准"
-          strokeDasharray={narrow ? "6 3" : "4 2"}
-        />
-      </LineChart>
-    </ResponsiveContainer>
-  );
+  return <LightweightLine data={data} height={height} valueFormat="pct" zeroLine />;
 }
 
 function AnnualReturnsChart({
@@ -1822,6 +1741,9 @@ export default function ResultPage() {
             <Sparkles className="h-3.5 w-3.5" />
             转 Paper 组合
           </Button>
+          {study && study.status === "COMPLETED" && result && (
+            <ShareStudyButton studyId={study.id} />
+          )}
           <Button
             size="sm"
             className="bg-blue-600 hover:bg-blue-700 text-white inline-flex items-center gap-1.5"

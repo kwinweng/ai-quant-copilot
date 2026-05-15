@@ -80,9 +80,11 @@ enum StudyStatus {
 }
 
 model Study {
-  id         String         @id @default(cuid())
-  userId     String
-  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Phase 16 — at most one active public share token per study.
+  shareToken  StudyShareToken?
   title      String
   hypothesis String         @db.Text
   market     String
@@ -179,6 +181,34 @@ model StudyResult {
   // Null on legacy results that pre-date sector tagging.
   sectorAllocation     Json?
   createdAt         DateTime @default(now())
+}
+
+// ============================================================
+// Phase 16 — Public study share tokens
+// ============================================================
+//
+// A user can mint at most one active share token per study (studyId is
+// UNIQUE). The token grants public, no-auth read access to a stripped-down
+// view of the study's result. Regenerating rotates the token (resets
+// viewCount); revoking deletes the row entirely.
+//
+// We track viewCount + lastAccessedAt for the share modal so the owner can
+// see whether anyone's actually opening the link. View bumps are fire-and-
+// forget — they MUST NOT block the public page render.
+model StudyShareToken {
+  id             String    @id @default(cuid())
+  studyId        String    @unique
+  study          Study     @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  userId         String    // denormalized owner for fast ACL checks
+  token          String    @unique  // 32-byte base64url, unguessable
+  viewCount      Int       @default(0)
+  lastAccessedAt DateTime?
+  // Null → never expires. Reserved for a future "expiring share link" UX.
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId])
 }
 
 // ============================================================

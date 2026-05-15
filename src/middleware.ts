@@ -20,7 +20,11 @@ export default auth((req) => {
   // and must NOT be redirected to /login. The route handlers themselves
   // enforce auth via the X-Cron-Secret header.
   const isCronRoute = pathname.startsWith("/api/cron/");
-  const isPublic = isAuthRoute || isCronRoute || PUBLIC_PATHS.has(pathname);
+  // Phase 16: /share/[token] is a public read-only view of a study,
+  // gated by the unguessable token in the URL — no session needed.
+  const isShareRoute = pathname.startsWith("/share/");
+  const isPublic =
+    isAuthRoute || isCronRoute || isShareRoute || PUBLIC_PATHS.has(pathname);
 
   if (!req.auth && !isPublic) {
     const url = new URL("/login", req.nextUrl);
