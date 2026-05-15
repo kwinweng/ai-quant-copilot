@@ -2,7 +2,18 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AppSessionProvider } from "@/components/providers/SessionProvider";
 
+// Phase 16: metadataBase tells Next.js how to resolve relative URLs in
+// generated meta tags (especially og:image). Without it, Next.js falls back
+// to http://localhost:3000 at build time — WeChat / Twitter / Discord then
+// can't fetch the OG card and unfurled previews don't show. Read from env so
+// dev still gets localhost; prod gets the real host.
+const SITE_URL =
+  process.env.APP_URL ??
+  process.env.AUTH_URL ??
+  "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "AI Quant Copilot",
   description: "AI 量化研究副驾驶 — 美股因子研究工具",
   // PWA / iOS home-screen install support.
