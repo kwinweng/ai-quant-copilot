@@ -30,3 +30,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS "StudyShareToken_token_key"
 
 CREATE INDEX IF NOT EXISTS "StudyShareToken_userId_idx"
   ON "StudyShareToken"("userId");
+
+-- IMPORTANT: when we apply migrations via `cat | sudo -u postgres psql`,
+-- new tables end up owned by `postgres` instead of `aiquant`, which means
+-- the app role hits "permission denied" on first query. This ALTER fixes
+-- that. ALTER TABLE OWNER is idempotent so it's safe to re-run.
+--
+-- Only do it when the role exists — first-time-ever fresh DB might not
+-- have created it yet (DEPLOY.md step 2 handles role creation).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aiquant') THEN
+    EXECUTE 'ALTER TABLE "StudyShareToken" OWNER TO aiquant';
+  END IF;
+END $$;
