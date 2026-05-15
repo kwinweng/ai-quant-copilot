@@ -2166,8 +2166,58 @@ function LearnGuide() {
           </ul>
         </Concept>
 
+        <Concept name="🗂️ 工具索引（找特定能力时直接查这里）">
+          <p className="text-xs">
+            上面的清单是「精选 + 解读」。当你需要找某个具体能力的工具时（如「Python 投资组合优化」「Wikipedia 历史 S&P 500 成分股抓取」「TS 技术指标库」），直接查下面这些 awesome 列表更快——它们是社区维护的「金融工具黄页」。
+          </p>
+          <ul className="list-disc pl-5 space-y-0.5 text-xs mt-2">
+            <li>
+              <strong>
+                <a
+                  href="https://github.com/wilsonfreitas/awesome-quant"
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-blue-600 hover:underline"
+                >
+                  awesome-quant
+                </a>
+              </strong>
+              （26k+ stars）：18 个分类 600+ 工具——投资组合优化、因子分析、回测框架、技术指标、数据源、可视化、Excel 集成全覆盖。**做某个具体集成前的第一站。**
+            </li>
+            <li>
+              <strong>
+                <a
+                  href="https://github.com/wilsonfreitas/awesome-quant#javascript"
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-blue-600 hover:underline"
+                >
+                  awesome-quant 的 JavaScript 章节
+                </a>
+              </strong>
+              ：TS/Node 工具不多但精——本工具 stack（Next.js + TS）能直接用的就靠这一段，例如 IndicatorTS（50+ 技术指标的 TS 实现）。
+            </li>
+            <li>
+              <strong>
+                <a
+                  href="https://github.com/grananqvist/Awesome-Quant-Machine-Learning-Trading"
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-blue-600 hover:underline"
+                >
+                  Awesome-Quant-Machine-Learning-Trading
+                </a>
+              </strong>
+              ：偏 ML / 量化结合的资源列表，适合关注「金融 + 深度学习」方向时翻一翻。
+            </li>
+          </ul>
+          <p className="text-xs mt-2 text-gray-500">
+            提醒：列表里 90% 是 Python 生态，少量 R/Julia/C++，TS/Node 的资源比例小。本工具技术栈下能直接接的不多，但**作为查询索引价值很高**。
+          </p>
+        </Concept>
+
         <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-900">
-          <strong>学习路径建议</strong>：先看完《打开量化投资的黑箱》对整个领域有个全貌 → 在本工具里跑 5-10 个研究、对照量化入门 1-5 章理解每个指标 → 看《Quantitative Equity Portfolio Management》前 5 章把因子模型打牢 → 找 1-2 篇原论文（推荐从 Fama-French 1992 开始）读完整版，体会「严谨研究长啥样」→ 最后如果还有兴趣，看 López de Prado 学怎么把 ML 引入。
+          <strong>学习路径建议</strong>：先看完《打开量化投资的黑箱》对整个领域有个全貌 → 在本工具里跑 5-10 个研究、对照量化入门 1-5 章理解每个指标 → 看《Quantitative Equity Portfolio Management》前 5 章把因子模型打牢 → 找 1-2 篇原论文（推荐从 Fama-French 1992 开始）读完整版，体会「严谨研究长啥样」→ 最后如果还有兴趣，看 López de Prado 学怎么把 ML 引入 → 实际开发时去 awesome-quant 找现成工具。
         </div>
       </LearnSection>
     </div>
