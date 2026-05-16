@@ -113,6 +113,12 @@ model Study {
   // { maxPositionWeight?: 0.2, maxSectorWeight?: 0.35, optimizer?: "equal_weight" }
   // (volTarget / min_var deferred — see ROADMAP.md Phase 14 范围外)
   constraints Json          @default("{}")
+  // Phase 6.5 — universe provider key. "static-60" preserves the legacy
+  // 60-ticker static list (and is the default so old rows keep behaving as
+  // before). "sp500-pit" routes the runner through TimeVaryingUniverseProvider
+  // backed by UniverseSnapshot rows (PIT-correct, no survivorship bias).
+  // Future: "sp100-pit" for Phase 6.6.
+  universeProvider String   @default("static-60")
   plan       StudyPlan?
   progress   StudyProgress?
   result     StudyResult?
@@ -181,6 +187,32 @@ model StudyResult {
   // Null on legacy results that pre-date sector tagging.
   sectorAllocation     Json?
   createdAt         DateTime @default(now())
+}
+
+// ============================================================
+// Phase 6.5 — Time-varying index universe snapshots
+// ============================================================
+//
+// One row per (monthKey, indexName) records the constituent tickers of an
+// equity index at that month's end. The runner queries this table when a
+// study's `universeProvider` is "sp500-pit" / "sp100-pit" so each rebalance
+// decision uses the index composition that was real at decision time,
+// eliminating survivorship bias.
+//
+// Hydration: a static seed JSON (prisma/seed-data/sp500-history.json) is
+// applied via `scripts/seed-sp500-history.ts`. The seed is canonical — never
+// fetched at runtime, never mutated by app code.
+//
+// Coverage at Phase 6.5 ship time: SP500 1996-01 → 2026-01. SP100 deferred
+// to Phase 6.6 (data source pending — Wikipedia "Changes" reconstruction).
+model UniverseSnapshot {
+  monthKey  String   // "YYYY-MM" (end-of-month constituency)
+  indexName String   // "SP500" | "SP100" (extensible — keep open)
+  tickers   String[] // raw tickers as-of monthKey, no dedupe required
+  createdAt DateTime @default(now())
+
+  @@id([monthKey, indexName])
+  @@index([indexName, monthKey])
 }
 
 // ============================================================
