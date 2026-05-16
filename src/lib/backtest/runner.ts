@@ -1,7 +1,12 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { UNIVERSE, DEFAULT_BENCHMARK, rebalanceMonthsOf } from "./universe";
-import { fetchMonthlyPrices } from "./prices";
+import { DEFAULT_BENCHMARK, rebalanceMonthsOf } from "./universe";
+import { fetchMonthlyPrices, monthKeyOf } from "./prices";
+import {
+  defaultUniverseProvider,
+  TimeVaryingUniverseProvider,
+  type UniverseProvider,
+} from "./universeProvider";
 import { compute121Momentum, computeMomentum } from "./factor";
 import type { FactorScores } from "./factor";
 import { runBacktest as runEngine } from "./engine";
@@ -328,6 +333,9 @@ interface SensitivityRunInput {
   baselineSkip: number;
   baselineRebalanceMonths: number;
   baselineTopQuintilePct: number;
+  // Phase 6.5: forward the PIT provider into each sensitivity variant so the
+  // sweep is consistent with the main run (same selection pool semantics).
+  universeProvider?: UniverseProvider;
 }
 
 function metricsForVariant(
@@ -354,6 +362,7 @@ function metricsForVariant(
     rebalanceMonths,
     txCostBps: args.txCostBps,
     topQuintilePct,
+    universeProvider: args.universeProvider,
   });
 
   if (path.equity.length < 2) {
@@ -454,6 +463,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         factorMix: true,
         costModel: true,
         constraints: true,
+        universeProvider: true,
       },
     });
     if (!study) {
@@ -466,7 +476,60 @@ export async function runBacktest(studyId: string): Promise<void> {
     // (we insert "拉取基本面数据" at slot 3).
     const stepIdx = (m: number) => (isMultiFactor && m >= 3 ? m + 1 : m);
 
+    // -------- Phase 6.5: resolve UniverseProvider --------
+    // Legacy rows have universeProvider = "static-60" (schema default) and route
+    // through defaultUniverseProvider — bit-for-bit replay of pre-Phase-6.5
+    // behavior. "sp500-pit" loads PIT-correct historical S&P 500 constituents.
+    // Anything unknown falls back to the static provider with a warning so a
+    // typo doesn't fail the whole backtest.
+    let universeProvider: UniverseProvider = defaultUniverseProvider;
+    if (study.universeProvider === "sp500-pit") {
+      try {
+        universeProvider = await TimeVaryingUniverseProvider.load(
+          prisma,
+          "SP500",
+        );
+      } catch (provErr) {
+        console.warn(
+          `[backtest] failed to load sp500-pit provider, falling back to static:`,
+          provErr,
+        );
+        // Don't fail the run — fall back to static with a logged warning.
+        // appendLog needs studyProgress to exist first, so defer the message
+        // until after initProgress below.
+      }
+    } else if (study.universeProvider && study.universeProvider !== "static-60") {
+      console.warn(
+        `[backtest] unknown universeProvider="${study.universeProvider}", falling back to static-60`,
+      );
+    }
+    // Compute the union ticker list scoped to the study's backtest window.
+    // For the static provider this is the full UNIVERSE; for time-varying it
+    // is every ticker that was in the index at any point during the window.
+    const startMonthKey = monthKeyOf(study.startDate);
+    const endMonthKey = monthKeyOf(study.endDate);
+    const universeWindow = {
+      startMonth: startMonthKey,
+      endMonth: endMonthKey,
+    };
+    const tickers = universeProvider.allTickers(universeWindow);
+    if (tickers.length === 0) {
+      throw new Error(
+        `[universe] ${universeProvider.name} 在 ${startMonthKey} → ${endMonthKey} 区间内为空，无法回测`,
+      );
+    }
+
     await initProgress(studyId, study.factorMix);
+    if (
+      study.universeProvider === "sp500-pit" &&
+      universeProvider === defaultUniverseProvider
+    ) {
+      await appendLog(
+        studyId,
+        "sp500-pit 数据未就绪，回退到静态 60 股票池（请联系管理员检查 UniverseSnapshot 表）",
+        "warning",
+      ).catch(() => {});
+    }
     // /start route already set Study.status to RUNNING; we don't redo it here
     // so we don't accidentally overwrite a CANCELLED status set in the
     // brief window between /start and runBacktest's first await.
@@ -492,10 +555,10 @@ export async function runBacktest(studyId: string): Promise<void> {
       studyId,
       1,
       "running",
-      `开始拉取股票池价格（${UNIVERSE.length} 个标的）`,
+      `开始拉取股票池价格（${tickers.length} 个标的，${universeProvider.name}）`,
     );
     const prices = await fetchMonthlyPrices({
-      tickers: UNIVERSE,
+      tickers,
       startDate: study.startDate,
       endDate: study.endDate,
       onTickerDone: ({ ticker, completed, total, pointCount }) => {
@@ -513,7 +576,7 @@ export async function runBacktest(studyId: string): Promise<void> {
       1,
       "complete",
       `股票池价格拉取完成，共 ${totalPoints} 个月度数据点`,
-      `${UNIVERSE.length} 个标的`,
+      `${tickers.length} 个标的`,
       Math.round((Date.now() - t2) / 1000),
     );
 
@@ -553,14 +616,14 @@ export async function runBacktest(studyId: string): Promise<void> {
         studyId,
         3,
         "running",
-        `开始拉取基本面数据（Yahoo 当前快照 + SEC EDGAR 历史 filings，${UNIVERSE.length} 个标的，首次约 30-60 秒，后续 24h 内复用缓存）`,
-        `0/${UNIVERSE.length}`,
+        `开始拉取基本面数据（Yahoo 当前快照 + SEC EDGAR 历史 filings，${tickers.length} 个标的，首次约 30-60 秒，后续 24h 内复用缓存）`,
+        `0/${tickers.length}`,
       );
       // Sprint #4 U10: maintain a live note string showing both fetchers'
       // progress so the running page reflects within-step movement.
       let mergedDone = 0;
       let secDone = 0;
-      const total = UNIVERSE.length;
+      const total = tickers.length;
       const refreshNote = () => {
         updateStepNote(
           studyId,
@@ -570,7 +633,7 @@ export async function runBacktest(studyId: string): Promise<void> {
       };
       const [merged, history] = await Promise.all([
         getMergedSnapshotsForUniverse(
-          UNIVERSE,
+          tickers,
           4,
           ({ ticker, completed, hasData }) => {
             mergedDone = completed;
@@ -584,7 +647,7 @@ export async function runBacktest(studyId: string): Promise<void> {
           },
         ),
         getSecHistoryForUniverse(
-          UNIVERSE,
+          tickers,
           4,
           ({ ticker, completed, snapshotCount }) => {
             secDone = completed;
@@ -600,8 +663,8 @@ export async function runBacktest(studyId: string): Promise<void> {
       ]);
       fundamentals = merged;
       secHistory = history;
-      factorCoverage = computeCoverage(UNIVERSE, fundamentals);
-      const covered = UNIVERSE.length - factorCoverage.missingTickers.length;
+      factorCoverage = computeCoverage(tickers, fundamentals);
+      const covered = tickers.length - factorCoverage.missingTickers.length;
       const totalHistRows = Object.values(secHistory).reduce(
         (s, arr) => s + arr.length,
         0,
@@ -610,7 +673,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         studyId,
         3,
         "complete",
-        `基本面数据拉取完成（${covered}/${UNIVERSE.length} 当前快照有数据，SEC 历史共 ${totalHistRows} 条 filing）`,
+        `基本面数据拉取完成（${covered}/${tickers.length} 当前快照有数据，SEC 历史共 ${totalHistRows} 条 filing）`,
         `价值 ${Math.round(factorCoverage.valueCoverage * 100)}% · 质量 ${Math.round(factorCoverage.qualityCoverage * 100)}%`,
         Math.round((Date.now() - tFund) / 1000),
       );
@@ -683,6 +746,7 @@ export async function runBacktest(studyId: string): Promise<void> {
       txCostBps: study.txCostBps,
       costMode,
       constraints,
+      universeProvider,
     });
     if (path.equity.length < 2) {
       throw new Error(
@@ -757,6 +821,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         baselineSkip: 1,
         baselineRebalanceMonths: rebalanceMonthsOf(study.rebalance),
         baselineTopQuintilePct: 0.2,
+        universeProvider,
       });
       await setStep(
         studyId,
@@ -848,13 +913,19 @@ export async function runBacktest(studyId: string): Promise<void> {
       | null = null;
     if (isMultiFactor && path.rebalances.length > 0) {
       const lastRebalance = path.rebalances[path.rebalances.length - 1];
+      // Phase 6.5: PIT-correct factor breakdown — the cross-sectional z-score
+      // baseline at the last rebalance should be computed over the universe
+      // that was actually eligible at that month, not the historical union.
+      // For static-60 this is exactly UNIVERSE; for sp500-pit it's the index
+      // composition at the rebalance date.
+      const lastEligible = universeProvider.tickersAt(lastRebalance.date);
       const momRaw: Record<string, number | undefined> = {};
-      for (const t of UNIVERSE) {
+      for (const t of lastEligible) {
         momRaw[t] = momentumScores[t]?.get(lastRebalance.date);
       }
       const momZ = zscoreMomentumAtMonth(momRaw);
       const mfOut = computeMultiFactorScores({
-        tickers: UNIVERSE,
+        tickers: lastEligible,
         fundamentals,
         momentumByTicker: momZ,
       });
@@ -907,12 +978,24 @@ export async function runBacktest(studyId: string): Promise<void> {
     const missingTickers = Object.entries(prices)
       .filter(([, m]) => m.size === 0)
       .map(([t]) => t);
+    // Phase 6.5: tag the provider mode so the result UI can pick the right
+    // disclosure copy without re-deriving from the universeProvider key.
+    const isPitProvider = universeProvider.name !== "static-60";
     const dataQuality = {
-      universeSize: UNIVERSE.length,
-      universeNote: `当前股票池为静态 ${UNIVERSE.length} 只美股大市值列表（覆盖 8 个 GICS 板块），整个回测窗口期保持不变。仍存在幸存者偏差（每只标的今天仍在交易），Phase 6.5 计划接入历史指数成分股以消除`,
-      survivorshipBias: true,
-      survivorshipNote:
-        "因为股票池在整个回测窗口里固定，已退市/被剔除指数的标的不在样本里，回测结果存在幸存者偏差",
+      universeSize: tickers.length,
+      universeProvider: universeProvider.name,
+      universeMode: isPitProvider ? "time-varying-pit" : "static",
+      universeNote: universeProvider.description(),
+      // Phase 6.5: survivorshipBias is honest about what we actually solve.
+      // PIT providers fix the *selection pool* (Lehman in 2008-08 etc.)
+      // but Yahoo still can't provide prices for true bankrupts — those
+      // ticker-months land in priceCoverage.missingTickers so the user sees
+      // exactly which names degraded silently. See ROADMAP Phase 6.5 §价值
+      // 叙事重新校准.
+      survivorshipBias: !isPitProvider,
+      survivorshipNote: isPitProvider
+        ? "Universe 已按 PIT 指数成分股切片，选股池历史精确；但价格层来自 Yahoo Finance，对真破产标的（Lehman / WaMu / Bear 等）无历史价格，会在 missingTickers 中明示。这是免费数据源天花板。"
+        : "因为股票池在整个回测窗口里固定，已退市/被剔除指数的标的不在样本里，回测结果存在幸存者偏差",
       factorType: isMultiFactor
         ? "Multi-factor (Value + Quality + 12-1 Momentum)"
         : "Price-only momentum",
@@ -923,7 +1006,7 @@ export async function runBacktest(studyId: string): Promise<void> {
         totalDataPoints: totalPoints,
         missingTickers,
         coveragePct: Math.round(
-          (totalPoints / (UNIVERSE.length * Math.max(1, benchmark.size))) * 100,
+          (totalPoints / (tickers.length * Math.max(1, benchmark.size))) * 100,
         ),
       },
       benchmarkTicker: benchTicker,

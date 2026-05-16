@@ -1,5 +1,6 @@
 import { MonthKey, MonthlyPrices, buildMonthAxis } from "./prices";
 import { FactorScores, rankByFactor } from "./factor";
+import type { UniverseProvider } from "./universeProvider";
 import {
   costFunctionForMode,
   type CostFunction,
@@ -29,6 +30,13 @@ export interface BacktestInput {
   // sector cap). Empty / undefined preserves the original equal-weight
   // behavior so old studies replay bit-for-bit.
   constraints?: PortfolioConstraints;
+  // Phase 6.5: PIT universe filter. When provided, the rebalance candidate
+  // pool at decision month M is intersected with `universeProvider.tickersAt(M)`
+  // before topN selection — this is what enforces "you can only hold what was
+  // actually in the index at decision time". Omitting (or passing a static
+  // provider that returns the same list every month) keeps the legacy
+  // behavior of "every scored ticker is eligible every month".
+  universeProvider?: UniverseProvider;
 }
 
 export interface MonthlyEquityPoint {
@@ -125,6 +133,7 @@ export function runBacktest(input: BacktestInput): BacktestPath {
     topQuintilePct = 0.2,
     costMode = "simple",
     constraints,
+    universeProvider,
   } = input;
   const costFn: CostFunction = costFunctionForMode(costMode);
   // Phase 14: detect whether any cap is actually configured so we can keep
@@ -177,9 +186,13 @@ export function runBacktest(input: BacktestInput): BacktestPath {
   let weights: PortfolioWeights = {};
   let monthsSinceRebalance = 0;
 
-  // First decision happens at firstMonth. Rebalance, then hold.
-  const universeSize = tickers.length;
-  const topN = Math.max(1, Math.round(universeSize * topQuintilePct));
+  // Phase 6.5: when a time-varying universe is in effect, topN is computed
+  // per-rebalance from the eligible PIT pool size (not the static full
+  // tickers list), so "top 20%" means 20% of currently-indexed names rather
+  // than 20% of every name we ever saw. For static providers the per-month
+  // eligible set equals the full tickers list, so this collapses back to
+  // the original constant — bit-for-bit replay of pre-Phase-6.5 studies.
+  const fullUniverseSize = tickers.length;
 
   for (let i = 0; i < axisMonths.length - 1; i++) {
     const decisionMonth = axisMonths[i];
@@ -195,7 +208,20 @@ export function runBacktest(input: BacktestInput): BacktestPath {
 
     if (isRebalance) {
       const ranked = rankByFactor(scores, decisionMonth);
-      const picks = topNFromRanked(ranked, topN);
+      // Phase 6.5: enforce PIT eligibility. Static providers return the full
+      // list and this filter is a no-op; time-varying providers shrink the
+      // pool to "what was actually in the index at decisionMonth".
+      const eligibleAtMonth = universeProvider
+        ? new Set(universeProvider.tickersAt(decisionMonth))
+        : null;
+      const eligibleRanked = eligibleAtMonth
+        ? ranked.filter((r) => eligibleAtMonth.has(r.ticker))
+        : ranked;
+      const eligiblePoolSize = eligibleAtMonth
+        ? eligibleAtMonth.size
+        : fullUniverseSize;
+      const topN = Math.max(1, Math.round(eligiblePoolSize * topQuintilePct));
+      const picks = topNFromRanked(eligibleRanked, topN);
       let w: PortfolioWeights;
       let wasConstrained = false;
       if (hasConstraints) {

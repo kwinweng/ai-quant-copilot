@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import { runBacktest } from "./engine";
 import type { MonthlyPrices } from "./prices";
 import type { FactorScores } from "./factor";
+import {
+  TimeVaryingUniverseProvider,
+  type UniverseProvider,
+} from "./universeProvider";
 
 // =====================================================================
 // Helpers — build monthly prices, scores, and benchmark Maps from compact
@@ -180,6 +184,131 @@ describe("runBacktest — rebalance frequency", () => {
       topQuintilePct: 0.5,
     });
     expect(monthly.rebalances.length).toBeGreaterThan(quarterly.rebalances.length);
+  });
+});
+
+describe("runBacktest — Phase 6.5 PIT universe filtering", () => {
+  it("with no universeProvider, every scored ticker is eligible every month (legacy path)", () => {
+    const start = new Date(Date.UTC(2020, 0, 1));
+    const end = new Date(Date.UTC(2020, 11, 1));
+    const axis = buildAxis(start, 12);
+    const prices: MonthlyPrices = {
+      A: priceSeriesFor(axis, axis.map((_, i) => 100 + i)),
+      B: priceSeriesFor(axis, axis.map((_, i) => 100 - i)),
+    };
+    // A always wins the rank.
+    const scores = constantScores(["A", "B"], axis, { A: 1, B: 0 });
+    const benchmark = priceSeriesFor(axis, axis.map(() => 100));
+
+    const result = runBacktest({
+      prices,
+      benchmark,
+      scores,
+      startDate: start,
+      endDate: end,
+      rebalanceMonths: 1,
+      txCostBps: 0,
+      topQuintilePct: 0.5, // top 1 of 2
+    });
+
+    // Without a provider, A should be picked every rebalance.
+    for (const r of result.rebalances) {
+      expect(r.holdings).toEqual(["A"]);
+    }
+  });
+
+  it("PIT provider excludes ineligible tickers from rebalance picks even when they top the score", () => {
+    // Scenario: A has the best score every month but is only "in the index"
+    // for the first two months. After that, only B is eligible. The engine
+    // must pick A at first, then switch to B once A drops out — proving the
+    // PIT filter overrides raw factor ranking.
+    const start = new Date(Date.UTC(2020, 0, 1));
+    const end = new Date(Date.UTC(2020, 11, 1));
+    const axis = buildAxis(start, 12);
+    const prices: MonthlyPrices = {
+      A: priceSeriesFor(axis, axis.map((_, i) => 100 + i)),
+      B: priceSeriesFor(axis, axis.map((_, i) => 100 + i)),
+    };
+    const scores = constantScores(["A", "B"], axis, { A: 1, B: 0 });
+    const benchmark = priceSeriesFor(axis, axis.map(() => 100));
+
+    const provider: UniverseProvider = new TimeVaryingUniverseProvider({
+      name: "test-pit",
+      description: "fixture",
+      snapshots: axis.map((m, i) => ({
+        monthKey: m,
+        tickers: i <= 1 ? ["A", "B"] : ["B"],
+      })),
+    });
+
+    const result = runBacktest({
+      prices,
+      benchmark,
+      scores,
+      startDate: start,
+      endDate: end,
+      rebalanceMonths: 1,
+      txCostBps: 0,
+      topQuintilePct: 0.5, // top 1 of pool
+      universeProvider: provider,
+    });
+
+    // First rebalance(s): A is eligible & wins.
+    // Once A drops from the index, picks must switch to B.
+    const aEverPicked = result.rebalances.some((r) => r.holdings.includes("A"));
+    const bEverPicked = result.rebalances.some((r) => r.holdings.includes("B"));
+    expect(aEverPicked).toBe(true);
+    expect(bEverPicked).toBe(true);
+
+    // After the second rebalance month, A must never appear (no longer in index).
+    const lateRebalances = result.rebalances.filter((r) => r.date > axis[1]);
+    for (const r of lateRebalances) {
+      expect(r.holdings).not.toContain("A");
+    }
+  });
+
+  it("topN scales with per-month eligible pool size, not with the historical union", () => {
+    // 5 tickers in score, but only 2 are in the index any given month. topN at
+    // 40% should be 1 (40% × 2 = 0.8 → max(1, round) = 1), not 2 (40% × 5).
+    const start = new Date(Date.UTC(2020, 0, 1));
+    const end = new Date(Date.UTC(2020, 11, 1));
+    const axis = buildAxis(start, 12);
+    const all = ["A", "B", "C", "D", "E"];
+    const prices: MonthlyPrices = {};
+    for (const t of all) {
+      prices[t] = priceSeriesFor(axis, axis.map(() => 100));
+    }
+    const scores: FactorScores = {};
+    for (let i = 0; i < all.length; i++) {
+      scores[all[i]] = new Map(axis.map((m) => [m, i])); // E > D > C > B > A
+    }
+    const benchmark = priceSeriesFor(axis, axis.map(() => 100));
+
+    const provider = new TimeVaryingUniverseProvider({
+      name: "test-pit-small",
+      description: "fixture",
+      // Only D and E are eligible at every month.
+      snapshots: axis.map((m) => ({ monthKey: m, tickers: ["D", "E"] })),
+    });
+
+    const result = runBacktest({
+      prices,
+      benchmark,
+      scores,
+      startDate: start,
+      endDate: end,
+      rebalanceMonths: 1,
+      txCostBps: 0,
+      topQuintilePct: 0.4,
+      universeProvider: provider,
+    });
+
+    // Per-month pool = 2 tickers. topN = max(1, round(0.4 × 2)) = 1.
+    for (const r of result.rebalances) {
+      expect(r.holdings).toHaveLength(1);
+      // The single pick must be E (highest score among the eligible pair).
+      expect(r.holdings[0]).toBe("E");
+    }
   });
 });
 

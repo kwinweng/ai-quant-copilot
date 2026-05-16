@@ -14,11 +14,13 @@ export interface MonthlyPrices {
   [ticker: string]: Map<MonthKey, number>;
 }
 
-function monthKey(date: Date): MonthKey {
+export function monthKeyOf(date: Date): MonthKey {
   const y = date.getUTCFullYear();
   const m = (date.getUTCMonth() + 1).toString().padStart(2, "0");
   return `${y}-${m}`;
 }
+// Back-compat alias for internal callers; kept private but functionally identical.
+const monthKey = monthKeyOf;
 
 // Pad start by 13 months so the first factor month (12-1 momentum needs 12
 // trailing prices + skip 1) lands exactly at the user's requested startDate.
