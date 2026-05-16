@@ -14,6 +14,25 @@ export interface MonthlyPrices {
   [ticker: string]: Map<MonthKey, number>;
 }
 
+// Phase 6.5 W2.2: per-ticker fetch outcome so the runner can write a precise
+// dataQuality.missingTickers list with reasons, rather than treating every
+// empty Map as the same kind of failure.
+//
+// status:
+//   "ok"        — got ≥ 1 monthly bar
+//   "no_data"   — upstream said this ticker has no data in the window
+//                 (e.g. delisted before window starts, or Yahoo never
+//                 indexed it). Deterministic — not retried.
+//   "transient" — network / rate-limit / unknown error after retries
+//                 exhausted. The ticker may or may not have data; we just
+//                 couldn't reach Yahoo. Surfacing this separately from
+//                 "no_data" lets the user re-run the study to recover.
+export interface TickerFetchOutcome {
+  status: "ok" | "no_data" | "transient";
+  pointCount: number;
+  reason?: string;
+}
+
 export function monthKeyOf(date: Date): MonthKey {
   const y = date.getUTCFullYear();
   const m = (date.getUTCMonth() + 1).toString().padStart(2, "0");
@@ -46,6 +65,36 @@ export interface FetchPricesOptions {
     total: number;
     pointCount: number;
   }) => void;
+  /** Phase 6.5 W2.2: optional sink for per-ticker outcome metadata. Pass a
+   * Map and the fetcher will populate it as each ticker resolves. The runner
+   * uses this to build dataQuality.priceCoverage.missingTickerDetails. */
+  outcomes?: Map<string, TickerFetchOutcome>;
+}
+
+// Pattern-match Yahoo errors into "no_data" (deterministic, don't retry) vs
+// "transient" (retryable). The yahoo-finance2 lib doesn't expose distinct
+// error classes, so we string-match the message — fragile but contained.
+// Exported for unit tests; the runtime callers all go through fetchWithRetry.
+export function classifyError(err: unknown): {
+  status: "no_data" | "transient";
+  reason: string;
+} {
+  const msg = err instanceof Error ? err.message : String(err);
+  // Empty-result errors from yahoo-finance2 — the ticker simply has no bars
+  // in the requested window. This is the common case for true bankrupts
+  // (LEHMQ / WAMUQ / BSC) where Yahoo never kept history after delisting.
+  if (msg.includes("Data doesn't exist")) {
+    return { status: "no_data", reason: "Yahoo 无该窗口的历史数据" };
+  }
+  // Schema validation — yahoo-finance2 got a response it can't parse. In
+  // practice this almost always means a stripped-down "delisted" payload
+  // for ex-tickers (e.g. ENRNQ post-bankruptcy). Treat as deterministic
+  // no-data to avoid futile retries.
+  if (msg.includes("Failed Yahoo Schema validation")) {
+    return { status: "no_data", reason: "Yahoo schema 校验失败（通常为退市标的）" };
+  }
+  // Anything else — network blip, rate limit, 5xx — could succeed on retry.
+  return { status: "transient", reason: msg };
 }
 
 async function fetchOne(
@@ -100,31 +149,94 @@ export async function fetchMonthlyPrices(
   let completed = 0;
   const total = tickers.length;
 
+  // Phase 6.5 W2.2: small helper that attempts one retry for transient errors
+  // (network / rate-limit) but skips retry for deterministic "no_data" cases.
+  // Static back-off keeps the code simple — Yahoo's rate-limit window is
+  // ~1 sec so this is enough to clear most transients without blowing up
+  // the wall-clock budget.
+  const fetchWithRetry = async (
+    ticker: string,
+  ): Promise<{ map: Map<MonthKey, number>; outcome: TickerFetchOutcome }> => {
+    try {
+      const map = await fetchOne(ticker, period1, period2);
+      return {
+        map,
+        outcome:
+          map.size > 0
+            ? { status: "ok", pointCount: map.size }
+            : {
+                status: "no_data",
+                pointCount: 0,
+                reason: "Yahoo 返回空 quotes 数组",
+              },
+      };
+    } catch (err1) {
+      const c1 = classifyError(err1);
+      if (c1.status === "no_data") {
+        return {
+          map: new Map(),
+          outcome: { status: "no_data", pointCount: 0, reason: c1.reason },
+        };
+      }
+      // Transient — wait 1s and retry once.
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const map = await fetchOne(ticker, period1, period2);
+        return {
+          map,
+          outcome:
+            map.size > 0
+              ? { status: "ok", pointCount: map.size }
+              : {
+                  status: "no_data",
+                  pointCount: 0,
+                  reason: "Yahoo 返回空 quotes 数组（重试后）",
+                },
+        };
+      } catch (err2) {
+        const c2 = classifyError(err2);
+        return {
+          map: new Map(),
+          outcome: { status: c2.status, pointCount: 0, reason: c2.reason },
+        };
+      }
+    }
+  };
+
   await new Promise<void>((resolve, reject) => {
     const tryDispatch = () => {
       while (inFlight < concurrency && nextIdx < total) {
         const ticker = tickers[nextIdx++];
         inFlight++;
-        fetchOne(ticker, period1, period2)
-          .then((map) => {
+        fetchWithRetry(ticker)
+          .then(({ map, outcome }) => {
             out[ticker] = map;
+            opts.outcomes?.set(ticker, outcome);
             completed++;
+            if (outcome.status !== "ok") {
+              console.warn(
+                `[backtest] ${ticker} → ${outcome.status}: ${outcome.reason ?? "no reason given"}`,
+              );
+            }
             opts.onTickerDone?.({
               ticker,
               completed,
               total,
-              pointCount: map.size,
+              pointCount: outcome.pointCount,
             });
           })
           .catch((err) => {
-            // A single delisted/malformed ticker shouldn't kill the whole
-            // backtest. Log and treat as no-data — the engine handles missing
-            // months gracefully.
-            console.warn(
-              `[backtest] Yahoo Finance fetch failed for ${ticker}:`,
-              err instanceof Error ? err.message : err,
+            // fetchWithRetry never throws, but guard anyway.
+            console.error(
+              `[backtest] fetchWithRetry unexpectedly threw for ${ticker}:`,
+              err,
             );
             out[ticker] = new Map();
+            opts.outcomes?.set(ticker, {
+              status: "transient",
+              pointCount: 0,
+              reason: err instanceof Error ? err.message : String(err),
+            });
             completed++;
             opts.onTickerDone?.({
               ticker,

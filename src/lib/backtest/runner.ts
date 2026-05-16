@@ -1,7 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { DEFAULT_BENCHMARK, rebalanceMonthsOf } from "./universe";
-import { fetchMonthlyPrices, monthKeyOf } from "./prices";
+import {
+  fetchMonthlyPrices,
+  monthKeyOf,
+  type TickerFetchOutcome,
+} from "./prices";
 import {
   defaultUniverseProvider,
   TimeVaryingUniverseProvider,
@@ -557,10 +561,16 @@ export async function runBacktest(studyId: string): Promise<void> {
       "running",
       `开始拉取股票池价格（${tickers.length} 个标的，${universeProvider.name}）`,
     );
+    // Phase 6.5 W2.2: collect per-ticker outcomes so dataQuality can
+    // distinguish "no upstream data" (Lehman-class) from "transient fetch
+    // failure" (network blip after retry). The Map is mutated as tickers
+    // resolve and read after the fetch settles.
+    const priceOutcomes = new Map<string, TickerFetchOutcome>();
     const prices = await fetchMonthlyPrices({
       tickers,
       startDate: study.startDate,
       endDate: study.endDate,
+      outcomes: priceOutcomes,
       onTickerDone: ({ ticker, completed, total, pointCount }) => {
         if (completed % 5 === 0 || completed === total) {
           appendLog(
@@ -978,6 +988,22 @@ export async function runBacktest(studyId: string): Promise<void> {
     const missingTickers = Object.entries(prices)
       .filter(([, m]) => m.size === 0)
       .map(([t]) => t);
+    // Phase 6.5 W2.2: structured breakdown of WHY each missing ticker is
+    // missing. "no_data" = Yahoo doesn't have history (typical for true
+    // bankrupts); "transient" = fetch failed after retry, user can re-run.
+    // For long PIT universes this can be 100+ entries; truncate to keep the
+    // result JSON small but always include the full counts.
+    const noDataTickers: { ticker: string; reason: string }[] = [];
+    const transientTickers: { ticker: string; reason: string }[] = [];
+    for (const t of missingTickers) {
+      const o = priceOutcomes.get(t);
+      const entry = { ticker: t, reason: o?.reason ?? "未记录原因" };
+      if (o?.status === "transient") {
+        transientTickers.push(entry);
+      } else {
+        noDataTickers.push(entry);
+      }
+    }
     // Phase 6.5: tag the provider mode so the result UI can pick the right
     // disclosure copy without re-deriving from the universeProvider key.
     const isPitProvider = universeProvider.name !== "static-60";
@@ -1008,6 +1034,14 @@ export async function runBacktest(studyId: string): Promise<void> {
         coveragePct: Math.round(
           (totalPoints / (tickers.length * Math.max(1, benchmark.size))) * 100,
         ),
+        // Phase 6.5 W2.2: structured breakdown so the UI can show "X tickers
+        // have no upstream data (Yahoo doesn't store post-bankruptcy history),
+        // Y had transient fetch failures (re-run to recover)". Limited to top
+        // 50 of each kind to keep the result JSON bounded.
+        noDataCount: noDataTickers.length,
+        transientCount: transientTickers.length,
+        noDataTickers: noDataTickers.slice(0, 50),
+        transientTickers: transientTickers.slice(0, 50),
       },
       benchmarkTicker: benchTicker,
       backtestMonths: path.equity.length - 1,
