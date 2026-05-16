@@ -174,9 +174,15 @@ export class TimeVaryingUniverseProvider implements UniverseProvider {
     }
     const name = indexName === "SP500" ? "sp500-pit" : indexName.toLowerCase();
     const display = indexName === "SP500" ? "S&P 500" : indexName;
+    // Honest framing — see ROADMAP Phase 6.5 价值叙事重新校准 + memory
+    // project_yahoo_delisted_gap.md. Universe is PIT-correct; price coverage
+    // for actual bankrupts (LEHMQ / WAMUQ / BSC / MER / CFC / ENE) is empty
+    // from Yahoo, so the runner reports those as missing ticker-months in
+    // dataQuality rather than claiming "no survivorship bias".
     const description =
-      `${display} 指数成分股（PIT-correct）：每个再平衡月份使用当时真实的指数成分，` +
-      `已消除幸存者偏差。包含 Lehman / Bear Stearns / WaMu 等关键退市标的的历史交易期。` +
+      `${display} 指数成分股（PIT-correct universe）：每个再平衡月份使用当时真实的指数成分，` +
+      `选股池历史精确。⚠️ 价格层数据来自 Yahoo Finance，对真破产标的（如 Lehman / WaMu / Bear Stearns）` +
+      `无历史价格，会在结果页 dataQuality 里明确披露为缺失 ticker-month。这是免费数据源的天花板。` +
       `数据源：fja05680/sp500 历史档案，覆盖 ${rows[0].monthKey} → ${rows[rows.length - 1].monthKey}。`;
     return new TimeVaryingUniverseProvider({
       name,

@@ -116,8 +116,11 @@ model Study {
   // Phase 6.5 — universe provider key. "static-60" preserves the legacy
   // 60-ticker static list (and is the default so old rows keep behaving as
   // before). "sp500-pit" routes the runner through TimeVaryingUniverseProvider
-  // backed by UniverseSnapshot rows (PIT-correct, no survivorship bias).
-  // Future: "sp100-pit" for Phase 6.6.
+  // backed by UniverseSnapshot rows (PIT-correct universe). Note: PIT applies
+  // to the *selection pool*, not to price availability — see ROADMAP §价值
+  // 叙事重新校准 + memory `project_yahoo_delisted_gap.md`. Bankrupt-ticker
+  // prices are still missing from Yahoo and reported in dataQuality rather
+  // than silently dropped.
   universeProvider String   @default("static-60")
   plan       StudyPlan?
   progress   StudyProgress?

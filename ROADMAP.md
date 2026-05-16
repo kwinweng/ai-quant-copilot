@@ -30,80 +30,88 @@
 
 ---
 
-## Phase 6.5 · 时变 universe（消除幸存者偏差）（2-3 周）
+## Phase 6.5 · 时变 universe（PIT-correct + 诚实披露数据缺失）（2-3 周）
 
-### 目标
+### 价值叙事（2026-05-16 重新校准）
 
-当前 60 ticker 股票池**全是 2026 仍在交易的赢家**——2008 的 Lehman / Bear Stearns / WaMu / Countrywide 这些应该出现在回测里的尸体根本不存在。这让任何包含 2008 区间的回测 CAGR **系统性高估 2-4 个百分点**。Phase 6.5 用每月当时的真实指数成分股替换静态股票池，把工具从「教育级数据质量」推到「半严肃验证级」。
+**原计划**：用 PIT 指数成分股替换静态 60 股票池 → 「消除幸存者偏差」。
+
+**现实校准**：W1 完工后做 reality check 发现 **Yahoo Finance 完全没有 LEHMQ / BSC / WAMUQ / CFC / MER / ENE 等关键退市标的的历史价格**（0/6 覆盖）。即使我们把 LEHMQ 放进 2008-08 的成分股，引擎拿不到价格 → 因子 NaN → 静默跳过。**仅靠免费源无法兑现「完全消除幸存者偏差」**。
+
+替代付费源调研后判定不接（Sharadar SEP $299/年、EODHD $19.99/月、Polygon Advanced $199/月 都能解决，但与产品「明确不做付费源」定位冲突，且当前用户量不到验证 ROI 的临界点——见 `memory/project_yahoo_delisted_gap.md`）。
+
+**Phase 6.5 重定义为「部分 PIT + 数据缺失诚实披露」**：
+- Universe 本身 PIT-correct（每月使用真实指数成分股，包括 LEHMQ 在 2008-08 仍在列）
+- 价格层数据缺失被**精确统计并展示**（多少 ticker-month 缺数据、占总 ticker-month 多少比例）
+- 用户看到的是「诚实的数据质量披露」，不是「魔法消除幸存者偏差」
+- CAGR 实际矫正幅度预计 <1pp（远低于原 ROADMAP 写的 2-4pp）
 
 ### 范围
 
-#### 数据层
-- 新表 `UniverseSnapshot { monthKey: "YYYY-MM" @id, tickers: String[], indexName: String }` 记录每月该指数的成分股清单
-- 数据源：从 Wikipedia 历史 S&P 500 成分股表 + 开源 csv（如 `fja05680/sp500` repo）合并，落地成静态 seed
-- **MVP 范围**：实现 S&P 100（成分变化少，约每年 2-3 次）作为第一个时变股票池；S&P 500 作为 stretch goal
-- 加 `seed-sp100-history.ts` 脚本一次性 hydrate `UniverseSnapshot` 表（从 1990 至今）
-- 已退市标的的价格处理：扩展 `src/lib/backtest/prices.ts` 容忍 Yahoo 返回 410 / delisted，记入 `dataQuality.delisted` 列表而非整个失败
+#### 数据层（W1 已交付，commit `773b101`）
+- ✅ 新表 `UniverseSnapshot { monthKey, indexName, tickers }`，复合 PK
+- ✅ `Study.universeProvider` 字段，默认 `"static-60"` 保留旧行为
+- ✅ Seed 数据：`prisma/seed-data/sp500-history.json`（1.1 MB，361 个月 1996-01→2026-01，源自 `fja05680/sp500`）
+- ✅ `scripts/prepare-sp500-history.ts` / `scripts/seed-sp500-history.ts`
 
-#### 引擎层
-- `src/lib/backtest/universeProvider.ts` 已有抽象，扩展 `UniverseProvider` 接口：
-  - `getUniverseAt(monthKey: string): readonly string[]` — 返回当月成分股
-  - 静态版（现有）返回固定 60，时变版查 `UniverseSnapshot`
-- `src/lib/backtest/runner.ts` 在每个月度 rebalance 决策时调用 `getUniverseAt(decisionMonth)` 获得当时股票池
-- 因子诊断 + 多因子合成需要兼容「每月不同 universe size」
+#### 引擎层（W2 进行中）
+- ✅ `TimeVaryingUniverseProvider` 类 + `load(prisma, indexName)` 异步工厂
+- 🔜 `runner.ts` 根据 `study.universeProvider` 解析 provider；上游 fetch 用 `provider.allTickers(window)`；rebalance 决策用 `provider.tickersAt(decisionMonth)`
+- 🔜 `prices.ts` 区分「真退市无数据」vs「网络错误」，输出 `missingTickers` 集合
+- 🔜 因子合成兼容月度变化的 universe size
 
-#### UI 层
-- 新研究表单加 universe 选择 dropdown：
-  - **静态 60**（保留旧默认，向后兼容老 study）
-  - **时变 S&P 100**（PIT-correct，无幸存者偏差，**Phase 6.5 主推**）
-  - 时变 S&P 500（stretch，可能 Phase 6.6 再发）
-- 结果页数据质量面板：显示 `survivorshipBias` 字段为 `false`（启用时变后）+ 加披露文本「每月使用当时的真实指数成分股」
-- 老 study 重跑保持原 universe（向后兼容硬保证）
-
-#### 关于退市标的的诚实处理
-- 不是所有退市标的 Yahoo 都有完整历史价格——这是行业老问题
-- 我们的策略：尽力而为，且**显式披露每个回测有多少 ticker-month 数据缺失**
-- 时变 universe 已经比静态大幅改善，但**仍不等于 CRSP-quality 数据**——免费数据源的天花板
+#### UI 层（W2.5）
+- 🔜 研究表单加 universe dropdown：
+  - **静态 60**（默认，保留旧行为）
+  - **时变 S&P 500（PIT, partial coverage）**
+- 🔜 Result 页 DataQualityCard 更新：
+  - 显示 `surveyMode: "partial-pit"`（不是 `survivorshipBias: false`，因为不诚实）
+  - 缺失数据明细：「本次回测覆盖 N 个 ticker-month，其中 X 个（Y%）因 Yahoo 无数据被跳过」
+  - 「为何缺失」可展开说明：Yahoo 对真破产标的不提供历史价格，这是免费源天花板
 
 ### 范围外（明确不做）
 
-- ❌ Russell 1000 / Russell 2000 历史成分股（数据更难获取，付费源依赖）
-- ❌ 港股 / A 股的时变 universe（依然在 H2 不做清单）
-- ❌ 死亡企业的 PIT 财务数据（SEC EDGAR 仍有，但映射复杂，留给 Phase 6.6）
-- ❌ 完美的 corporate action 处理（spinoff / 并购等，依赖付费数据）
+- ❌ 接付费数据源（Sharadar / EODHD / Polygon）—— 与产品定位冲突；架构已预留，未来需要时再切
+- ❌ Russell 1000 / Russell 2000 历史成分股
+- ❌ S&P 100 时变 universe（数据源不如 SP500 完整，留 Phase 6.6 if needed）
+- ❌ 港股 / A 股的时变 universe
+- ❌ 死亡企业的 PIT 财务数据
+- ❌ 完美的 corporate action 处理
 
 ### 验收
 
-- ✅ 启用「时变 S&P 100」选项后，2008 年 Q4 回测的 universe 包含 Lehman（已破产）+ Bear Stearns 等关键退市标的
-- ✅ 同一假设跑「静态 60」vs「时变 S&P 100」的 CAGR 差异**可观测**（通常时变版 CAGR 低 2-4pp，证明在矫正 survivorship）
-- ✅ `dataQuality.survivorshipBias: false` 在结果页正确显示
-- ✅ 数据缺失的 ticker-month 显式列出，不静默吞掉
-- ✅ 老 study 重跑结果 bit-for-bit 一致（静态 universe 路径未变）
-- ✅ 单元测试覆盖 `getUniverseAt` 边界（成分股变更月、IPO 时间、退市时间）
+- ✅ 启用「时变 SP500」选项后，2008-08 的 universe 包含 LEHMQ（W1 已实现，seed 已验证）
+- ✅ Result 页明确显示数据缺失统计（不静默吞掉）
+- ✅ 老 study 重跑 bit-for-bit 一致（静态 universe 路径未变）
+- ✅ 单元测试覆盖 `tickersAt` 边界 + `allTickers` window 切片（W1 已 12 个测试）
+- 🔜 同一假设跑「静态 60」vs「时变 SP500」CAGR 差异**可观测**（预计 0.3-1pp，体现部分 PIT 矫正）
+- 🔜 缺失 ticker-month 统计准确（spot-check 2008-Q4：LEHMQ 应在 missing 列表）
 
 ### 工作量分解
 
-| 周 | 任务 |
-|---|---|
-| W1 | 数据获取 + Schema migration + Seed 脚本 + UniverseSnapshot 表 + getUniverseAt 查询 |
-| W2 | universeProvider 扩展 + runner 集成 + 退市价格 fetcher 鲁棒性 + 测试 |
-| W2.5 | UI 表单 dropdown + 数据质量面板更新 + 文档（About 更新说明 + 量化入门 Ch3 幸存者偏差章节修订） |
+| 周 | 任务 | 状态 |
+|---|---|---|
+| W1 | 数据层 + Provider 类 + 单测 | ✅ commit `773b101` (2026-05-16) |
+| W2.0 | 价值叙事重新校准（本次提交） | 🔄 |
+| W2.1 | Runner 接入 UniverseProvider | 🔜 |
+| W2.2 | prices.ts 退市价格鲁棒 + missingData 追踪 | 🔜 |
+| W2.3 | 表单 dropdown + DataQualityCard | 🔜 |
+| W2.4 | 单测 + smoke test | 🔜 |
 
 ### 风险点
 
 | 风险 | 缓解 |
 |---|---|
-| Wikipedia 历史成分股数据本身有错误 | 用 2+ 开源源交叉验证；写入 seed 后做静态 review；提供「报告数据错误」入口 |
-| 退市标的 Yahoo 拿不到完整价格 | 在 dataQuality 显式列出缺失 ticker；不静默插值 |
-| 时变 universe 月度变化导致 factor IC 抖动 | 文档披露：Universe 变化本身是市场过程的一部分，IC 测量应在 PIT universe 上做 |
-| 实际工作量超 2-3 周 | MVP 砍范围到 S&P 100；S&P 500 推到 Phase 6.6 |
+| 用户读完文档觉得「就这？」 | 价值叙事改成「诚实披露」而不是「魔法消除」；用户教育成本由 Result 页文案承担 |
+| 月度变化的 universe size 让因子诊断抖动 | 文档披露；IC 测量在 PIT universe 上做才对 |
+| 老 study 兼容性破坏 | 默认 `universeProvider="static-60"` + runner 路由严格按字段分支 |
 
 ### 与产品定位的关系
 
-**这是把工具从「教育产品」推向「半严肃研究产品」的最大单点杠杆**。完成 Phase 6.5 后：
-- 我们的回测**理直气壮可以说没有幸存者偏差**——零售工具里几乎找不到第二家这么做
-- Phase 15 校准闭环的数据从此**真正可信**（不被 universe bias 污染）
-- 用户调研里最常见的吐槽点之一被消除
+**仍是把工具往「半严肃研究产品」推的关键一步**，但价值表达方式变了：
+- ~~回测理直气壮没有幸存者偏差~~ → **回测的 universe 是 PIT-correct，数据缺失精确披露**
+- 零售工具里能做到「universe PIT + 诚实披露 missing」的依然很少
+- 架构已经为未来接付费源（Sharadar SEP / EODHD）零代价铺好——当用户量 / 收入到位时一行切换
 
 但**仍不等于「下真金白银的工具」**——见 §「明确不做」的付费数据源那条。
 
