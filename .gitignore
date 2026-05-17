@@ -63,3 +63,6 @@ target/
 # Ralph backup directories (created by migration)
 .ralph_backup_*
 .gstack/
+
+# Local-only docs with production secrets (IP/SSH details)
+docs/*.local.md
